@@ -562,6 +562,9 @@
     <string name="beta_update_check_failed">Beta update check failed. Pull down to refresh and try again.</string>
     <string name="manager_update_stable">Stable update</string>
     <string name="manager_update_beta">Beta update</string>
+    <string name="manager_beta_unverified">Beta %1$s is not recommended: this build has no verified kernel compatibility metadata. Installation is disabled.</string>
+    <string name="manager_beta_incompatible">Beta %1$s is not compatible with this KernelSU kernel. Installation is disabled.</string>
+    <string name="manager_beta_changed">Kernel compatibility could not be reverified. Beta download blocked.</string>
     <string name="manager_update_details">Version: %1$s (%2$d)\nArchitecture: %3$s</string>
     <string name="settings_check_beta_update">Check beta updates</string>
     <string name="settings_check_beta_update_summary">Auto-check beta builds from the main branch</string>

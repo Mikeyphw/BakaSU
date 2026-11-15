@@ -517,6 +517,9 @@
     <string name="beta_update_check_failed">A verificação da atualização beta falhou. Deslize para baixo para atualizar e tente novamente.</string>
     <string name="manager_update_stable">Atualização estável</string>
     <string name="manager_update_beta">Atualização Beta</string>
+    <string name="manager_beta_unverified">Beta %1$s não recomendada: esta compilação não possui metadados de compatibilidade verificados. Instalação bloqueada.</string>
+    <string name="manager_beta_incompatible">Beta %1$s incompatível com este kernel KernelSU. Instalação bloqueada.</string>
+    <string name="manager_beta_changed">Não foi possível verificar novamente a compatibilidade do kernel. Download beta bloqueado.</string>
     <string name="manager_update_details">Versão: %1$s (%2$d)\nArquitetura: %3$s</string>
     <string name="settings_check_beta_update">Confira as atualizações beta</string>
     <string name="settings_check_beta_update_summary">Verificação automática de versões beta a partir da ramificação principal</string>

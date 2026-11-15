@@ -25,4 +25,5 @@ data class ManagerUpdateInfo(
     val fileName: String,
     val source: ManagerApkSource,
     val changelog: String = "",
+    val compatibilityRequirements: ManagerCompatibilityRequirements? = null,
 )
