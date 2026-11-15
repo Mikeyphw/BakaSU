@@ -21,12 +21,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Validate upstream integration points
         run: python3 -B scripts/fork/source_contract.py --check
       - name: Test contract diagnostics
         run: python3 -B -m unittest discover -s scripts/fork/tests -p 'test_*.py' -v
-      - name: Check whitespace
-        run: git show --format= --check HEAD
+      - name: Check changed lines for whitespace
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$PR_BASE_SHA" && -n "$PR_HEAD_SHA" ]]; then
+            git diff --check "$PR_BASE_SHA" "$PR_HEAD_SHA" --
+          else
+            # Dispatch only compares fork-owned baseline files, not upstream files.
+            git diff --check HEAD^ HEAD -- \
+              .github/workflows/fork-manager-ci.yml \
+              docs/FORK_DELIVERY.md scripts/fork/
+          fi
 
   manager-debug:
     needs: source-contract

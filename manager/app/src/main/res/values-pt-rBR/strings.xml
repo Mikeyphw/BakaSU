@@ -58,6 +58,10 @@
     <string name="profile_selinux_domain">Domínio</string>
     <string name="profile_selinux_rules">Regras</string>
     <string name="module_update">Atualizar</string>
+    <string name="module_reinstall">Reinstalar</string>
+    <string name="module_reinstall_confirm">Reinstalar %1$s (versão %2$s) usando o ZIP de atualização publicado? O módulo será gravado novamente e poderá ser necessário reiniciar.</string>
+    <string name="module_reinstall_verified">O ZIP será validado com os metadados de lançamento e SHA-256 do repositório antes da instalação.</string>
+    <string name="module_reinstall_unverified">Este ZIP foi fornecido pelo autor, sem verificação SHA-256 pelo repositório. Prossiga somente se confiar na origem.</string>
     <string name="module_downloading">Baixando módulo %s</string>
     <string name="module_start_downloading">Começando a baixar %s</string>
     <string name="new_version_available">Nova versão %s está disponível, clique para atualizar.</string>
