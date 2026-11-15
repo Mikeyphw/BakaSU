@@ -804,12 +804,18 @@ private fun ModuleList(
         }
         val registry = verification as? ModuleUpdateVerification.Registry
         val canInstall = {
-            if (reinstall) viewModel.isReinstallCurrent(module, registry)
-            else registry == null || viewModel.isUpdateCurrent(module, registry)
+            if (reinstall) {
+                viewModel.isReinstallCurrent(module, registry)
+            } else {
+                registry == null || viewModel.isUpdateCurrent(module, registry)
+            }
         }
         val confirmResult = if (reinstall) {
-            val warning = if (registry == null) context.getString(R.string.module_reinstall_unverified)
-                else context.getString(R.string.module_reinstall_verified)
+            val warning = if (registry == null) {
+                context.getString(R.string.module_reinstall_unverified)
+            } else {
+                context.getString(R.string.module_reinstall_verified)
+            }
             confirmDialog.awaitConfirm(
                 context.getString(R.string.module_reinstall),
                 content = context.getString(R.string.module_reinstall_confirm, module.name, module.version) +
@@ -818,29 +824,27 @@ private fun ModuleList(
             )
         } else {
             val changelogResult = if (registry != null) {
-            Result.success(
-                ModuleReadme(
-                    registry.release.descriptionHTML.ifBlank { module.description },
-                    registry.repositoryUrl,
-                    if (registry.release.descriptionHTML.isNotBlank()) DocumentFormat.HTML else DocumentFormat.MARKDOWN,
-                    DocumentPolicy.SameOrigin(registry.repositoryUrl),
-                ),
-            )
-        } else {
-            loadingDialog.withLoading { viewModel.loadUpdateChangelog(changelogUrl, module.updateJson) }
-        }
+                Result.success(
+                    ModuleReadme(
+                        registry.release.descriptionHTML.ifBlank { module.description },
+                        registry.repositoryUrl,
+                        if (registry.release.descriptionHTML.isNotBlank()) DocumentFormat.HTML else DocumentFormat.MARKDOWN,
+                        DocumentPolicy.SameOrigin(registry.repositoryUrl),
+                    ),
+                )
+            } else {
+                loadingDialog.withLoading { viewModel.loadUpdateChangelog(changelogUrl, module.updateJson) }
+            }
             val changelog = changelogResult.getOrElse {
-            showToast(context.getString(R.string.repo_document_error))
-            return
-        }
-
+                showToast(context.getString(R.string.repo_document_error))
+                return
+            }
             confirmDialog.awaitConfirm(
-            changelogText,
-            content = changelog.content,
-            document = changelog,
-            confirm = updateText,
-        )
-
+                changelogText,
+                content = changelog.content,
+                document = changelog,
+                confirm = updateText,
+            )
         }
 
         if (confirmResult != ConfirmResult.Confirmed) {

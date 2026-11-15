@@ -139,14 +139,22 @@ class ModuleViewModel(
         return resolveModuleUpdate(module.id, module.updateJson, candidate.zipUrl, candidate.versionCode)
     }
 
-    fun isReinstallCurrent(module: InstalledModule, verification: ModuleUpdateVerification.Registry?): Boolean =
-        (verification == null || resolveModuleUpdate.isCurrent(verification)) &&
-            observeInstalledModules().value.modules.any {
-                it.id == module.id && !it.remove && !it.update &&
-                    it.versionCode == module.versionCode && it.updateJson == module.updateJson &&
-                    it.moduleReinstall != null && it.moduleReinstall == module.moduleReinstall &&
-                    it.moduleReinstall.versionCode == module.versionCode
-            }
+    fun isReinstallCurrent(
+        module: InstalledModule,
+        verification: ModuleUpdateVerification.Registry?,
+    ): Boolean {
+        if (verification != null && !resolveModuleUpdate.isCurrent(verification)) return false
+        return observeInstalledModules().value.modules.any { installed ->
+            installed.id == module.id &&
+                !installed.remove &&
+                !installed.update &&
+                installed.versionCode == module.versionCode &&
+                installed.updateJson == module.updateJson &&
+                installed.moduleReinstall != null &&
+                installed.moduleReinstall == module.moduleReinstall &&
+                installed.moduleReinstall.versionCode == module.versionCode
+        }
+    }
 
     suspend fun loadUpdateChangelog(url: String, configuredSource: String) = getModuleUpdateChangelog(url, configuredSource)
 

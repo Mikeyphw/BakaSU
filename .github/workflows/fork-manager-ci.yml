@@ -58,6 +58,33 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
+      # Run the SAME formatter as upstream Lints Check. Produce a reviewable
+      # patch artifact on failure, never auto-commit or silently relax lint.
+      - name: Check manager formatting
+        id: spotless
+        continue-on-error: true
+        run: ./gradlew spotlessCheck --no-configuration-cache --no-daemon
+      - name: Prepare exact formatter diff for diagnostics
+        if: steps.spotless.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew spotlessApply --no-configuration-cache --no-daemon
+          git -C "$GITHUB_WORKSPACE" diff --binary -- manager/ > "$GITHUB_WORKSPACE/bakasu-format-fix.patch"
+          test -s "$GITHUB_WORKSPACE/bakasu-format-fix.patch"
+      - name: Upload formatting patch for review
+        if: steps.spotless.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: bakasu-spotless-fix-${{ github.sha }}
+          path: bakasu-format-fix.patch
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Enforce formatting gate
+        if: steps.spotless.outcome == 'failure'
+        run: |
+          echo 'BK_F02_FORMAT_REFUSED: download formatter patch artifact; never skip spotlessCheck'
+          exit 1
       - name: Build manager only (no kernel/ksud or release signing)
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
       - name: Upload debug APK for CI inspection (NOT a release)

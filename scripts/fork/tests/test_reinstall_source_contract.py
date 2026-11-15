@@ -27,8 +27,9 @@ class ReinstallSourceContract(unittest.TestCase):
         self.assertIn('suspend fun resolveReinstall(', v)
         self.assertIn('resolveModuleUpdate(module.id, module.updateJson, candidate.zipUrl, candidate.versionCode)', v)
         self.assertIn('resolveModuleUpdate.isCurrent(verification)', v)
-        self.assertIn('!it.remove && !it.update', v)
-        self.assertIn('it.moduleReinstall == module.moduleReinstall', v)
+        self.assertIn('!installed.remove', v)
+        self.assertIn('!installed.update', v)
+        self.assertIn('installed.moduleReinstall == module.moduleReinstall', v)
 
     def test_confirmed_flash_reuses_verified_pipeline(self):
         p = src('manager/app/src/main/java/org/bakasu/bakasu/ui/screen/main/ModulePage.kt')

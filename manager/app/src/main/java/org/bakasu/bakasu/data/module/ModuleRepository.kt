@@ -139,10 +139,9 @@ class ModuleRepository(
 
     // Retains the original Update behavior; exact-version candidates are only used
     // by the separate, user-confirmed Reinstall action.
-    suspend fun checkUpdate(url: String, currentVersionCode: Int): Result<ModuleUpdateMetadata?> =
-        fetchUpdateMetadata(url).map { metadata ->
-            metadata?.takeIf { it.versionCode > currentVersionCode }
-        }
+    suspend fun checkUpdate(url: String, currentVersionCode: Int): Result<ModuleUpdateMetadata?> = fetchUpdateMetadata(url).map { metadata ->
+        metadata?.takeIf { it.versionCode > currentVersionCode }
+    }
 
     private suspend fun fetchUpdateMetadata(url: String): Result<ModuleUpdateMetadata?> {
         if (url.isBlank()) return Result.success(null)
