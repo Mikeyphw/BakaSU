@@ -43,11 +43,25 @@ def signed():
 
 
 class ReleaseSecurityTests(unittest.TestCase):
-    def test_default_review_registry_intentionally_empty(self):
+    def test_current_review_registry_is_valid_and_all_entries_remain_explicit(self):
+        # A hard-coded empty-only test becomes obsolete on the first reviewed
+        # release. Validate the live registry, with no implicit approvals.
         doc=json.loads((ROOT/'config/fork-release-review.json').read_text())
-        self.assertEqual(doc['approvedCandidates'],[])
+        self.assertEqual(doc.get('schemaVersion'), 1)
+        self.assertEqual(doc.get('repository'), f07.REPO)
+        self.assertEqual(doc.get('defaultBranch'), 'main')
+        rows=doc.get('approvedCandidates')
+        self.assertIsInstance(rows, list)
+        identities=set()
+        for entry in rows:
+            self.assertIsInstance(entry,dict)
+            ident=(entry.get('f06RunId'), entry.get('tag'), entry.get('channel'))
+            self.assertNotIn(ident,identities)
+            identities.add(ident)
+            self.assertEqual(f07.reviewed_entry(doc,*ident),entry)
+        # A fresh unrelated identity is never authorized by any registry.
         with self.assertRaises(f07.Refused):
-            f07.reviewed_entry(doc,RUN,TAG,'beta')
+            f07.reviewed_entry(doc, 2147483647, 'f07-v9999999-beta', 'beta')
 
     def test_explicit_review_pin_requires_full_identity(self):
         self.assertEqual(f07.reviewed_entry(registry(),RUN,TAG,'beta')['sourceMergedSha'],HEAD)

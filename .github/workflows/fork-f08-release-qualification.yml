@@ -1,0 +1,88 @@
+name: Fork F08 — Read-Only Published Manager Qualification
+
+# No push/tag/PR/release triggers. This is post-publication verification, not
+# promotion, signing, installation or device authorization.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Exact reviewed f07-v* tag already published by F07
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: fork-f08-readonly-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  published-manager-audit:
+    if: github.repository == 'Mikeyphw/BakaSU' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout audited fork main (no credentials persisted)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run all fork security and regression contracts
+        run: |
+          set -euo pipefail
+          python3 -B scripts/fork/source_contract.py --check
+          python3 -B -m unittest discover -s scripts/fork/tests -p 'test_*.py' -v
+      - name: Download only the named fork release and its GitHub metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          F08_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$F08_TAG" =~ ^f07-v[0-9][A-Za-z0-9._-]{0,75}$ ]]
+          mkdir -p "$RUNNER_TEMP/f08/assets"
+          gh api "repos/Mikeyphw/BakaSU/releases/tags/$F08_TAG" > "$RUNNER_TEMP/f08/release.json"
+          gh release download "$F08_TAG" -R Mikeyphw/BakaSU \
+            -D "$RUNNER_TEMP/f08/assets"
+          F08_RUN_ID="$(python3 - "$RUNNER_TEMP/f08/assets/f07-release-provenance.json" <<'PY'
+          import json,sys
+          from pathlib import Path
+          p=Path(sys.argv[1]); data=json.loads(p.read_text())
+          value=data.get('f06RunId')
+          if type(value) is not int or value <= 0:
+              raise SystemExit('F08_F06_RUN_ID_INVALID')
+          print(value)
+          PY
+          )"
+          [[ "$F08_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/Mikeyphw/BakaSU/actions/runs/$F08_RUN_ID" > "$RUNNER_TEMP/f08/f06-run.json"
+          mkdir -p "$RUNNER_TEMP/f08/f06-evidence"
+          gh run download "$F08_RUN_ID" -R Mikeyphw/BakaSU \
+            -n "f06-source-and-signer-evidence-$F08_RUN_ID" \
+            -D "$RUNNER_TEMP/f08/f06-evidence"
+          test -f "$RUNNER_TEMP/f08/f06-evidence/f06-signed-provenance.json"
+      - name: Independently verify signer, package, provenance and compatibility
+        shell: bash
+        env:
+          F08_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          test -n "${ANDROID_HOME:-}"
+          test -d "$ANDROID_HOME/build-tools"
+          python3 -B scripts/fork/f08_qualification.py \
+            --tag "$F08_TAG" \
+            --assets "$RUNNER_TEMP/f08/assets" \
+            --release-json "$RUNNER_TEMP/f08/release.json" \
+            --f06-run-json "$RUNNER_TEMP/f08/f06-run.json" \
+            --f06-evidence "$RUNNER_TEMP/f08/f06-evidence/f06-signed-provenance.json" \
+            --report "$RUNNER_TEMP/f08/qualification.json"
+      - name: Preserve independent audit evidence (never APKs or secrets)
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fork-f08-published-release-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/f08/qualification.json
+          if-no-files-found: error
+          retention-days: 30
