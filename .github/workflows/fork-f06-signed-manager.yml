@@ -1,0 +1,142 @@
+name: Fork F06 — Source-Pinned Signed Manager Qualification
+
+# Deliberately no push, tag, schedule, PR, release or publishing trigger.
+# The workflow is available only on the default branch after source review.
+run-name: F06/${{ inputs.channel }}/${{ inputs.upstream_sha }}/${{ inputs.fork_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        type: choice
+        options: [beta, stable]
+        required: true
+      upstream_sha:
+        description: Exact upstream source commit (40 lowercase hex)
+        type: string
+        required: true
+      upstream_event_id:
+        description: Upstream beta Actions run ID or stable release ID
+        type: string
+        required: true
+      fork_sha:
+        description: Expected fork default-branch HEAD (40 lowercase hex)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-f06-sign-${{ inputs.channel }}-${{ inputs.upstream_sha }}-${{ inputs.fork_sha }}
+  cancel-in-progress: false
+
+jobs:
+  signed-manager-qualification:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    environment: fork-signing
+    steps:
+      - name: Checkout fork main (no persisted credentials)
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prove default-branch source identity before integration
+        env:
+          EXPECTED_FORK_SHA: ${{ inputs.fork_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_FORK_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$GITHUB_SHA" = "$EXPECTED_FORK_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_FORK_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Validate all existing fork contracts
+        run: |
+          python3 -B scripts/fork/source_contract.py --check
+          python3 -B -m unittest discover -s scripts/fork/tests -p 'test_*.py' -v
+      - name: Verify upstream event and integrate exact commit in disposable checkout
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          F06_CHANNEL: ${{ inputs.channel }}
+          F06_UPSTREAM_SHA: ${{ inputs.upstream_sha }}
+          F06_EVENT_ID: ${{ inputs.upstream_event_id }}
+          F06_FORK_SHA: ${{ inputs.fork_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B scripts/fork/f05_source_build.py stage \
+            --channel "$F06_CHANNEL" --upstream-sha "$F06_UPSTREAM_SHA" \
+            --event-id "$F06_EVENT_ID" --fork-sha "$F06_FORK_SHA" \
+            --report "$GITHUB_WORKSPACE/f06-f05-source.json"
+      - name: Revalidate integrated source before unlocking the signer
+        run: |
+          python3 -B scripts/fork/source_contract.py --check
+          python3 -B -m unittest discover -s scripts/fork/tests -p 'test_*.py' -v
+      - name: Setup Java 21 and hosted Gradle
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+      - name: Prepare persistent signing identity (no key in logs or output)
+        env:
+          FORK_SIGNER_KEYSTORE_B64: ${{ secrets.FORK_SIGNER_KEYSTORE_B64 }}
+          FORK_SIGNER_STORE_PASSWORD: ${{ secrets.FORK_SIGNER_STORE_PASSWORD }}
+          FORK_SIGNER_KEY_ALIAS: ${{ secrets.FORK_SIGNER_KEY_ALIAS }}
+          FORK_SIGNER_KEY_PASSWORD: ${{ secrets.FORK_SIGNER_KEY_PASSWORD }}
+          FORK_SIGNER_CERT_SHA256: ${{ secrets.FORK_SIGNER_CERT_SHA256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B scripts/fork/f06_signing.py prepare \
+            --source "$GITHUB_WORKSPACE/f06-f05-source.json" \
+            --manager "$GITHUB_WORKSPACE/manager" --scratch "$RUNNER_TEMP"
+      - name: Build fork-isolated signed manager (hosted only)
+        working-directory: manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew spotlessCheck :app:assembleRelease \
+            -PKSU_PACKAGE_NAME=com.mikeyphw.bakasu \
+            --no-configuration-cache --no-daemon --stacktrace
+      - name: Verify every APK signature, signer identity and package metadata
+        env:
+          FORK_SIGNER_CERT_SHA256: ${{ secrets.FORK_SIGNER_CERT_SHA256 }}
+          EXPECTED_FORK_SHA: ${{ inputs.fork_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B scripts/fork/f06_signing.py verify \
+            --source "$GITHUB_WORKSPACE/f06-f05-source.json" \
+            --apk-dir "$GITHUB_WORKSPACE/manager/app/build/outputs/apk/release" \
+            --output "$GITHUB_WORKSPACE/f06-signed-provenance.json" \
+            --fork-sha "$EXPECTED_FORK_SHA"
+      - name: Scrub ephemeral Gradle signing properties and keystore
+        if: always()
+        shell: bash
+        run: |
+          python3 -B scripts/fork/f06_signing.py cleanup \
+            --manager "$GITHUB_WORKSPACE/manager" --scratch "$RUNNER_TEMP"
+      - name: Upload source and signer provenance (not release qualification)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: f06-source-and-signer-evidence-${{ github.run_id }}
+          path: |
+            f06-f05-source.json
+            f06-signed-provenance.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload signed manager diagnostic APKs (NOT a GitHub release)
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: f06-signed-manager-diagnostic-${{ github.run_id }}
+          path: manager/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14

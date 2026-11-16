@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "repository": "Mikeyphw/BakaSU",
+  "branch": "main",
+  "managerPackage": "com.mikeyphw.bakasu",
+  "buildMode": "manual-source-pinned-signing-diagnostic",
+  "releasePublication": false,
+  "deviceInstallation": false,
+  "requireV2Signature": true,
+  "requireExpectedSignerFingerprint": true,
+  "compatibilityManifestPublished": false
+}
