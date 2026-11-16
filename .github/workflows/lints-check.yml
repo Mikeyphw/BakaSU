@@ -28,15 +28,14 @@ jobs:
         with:
           components: rustfmt
 
-      - uses: LoliGothick/rustfmt-check@master
-        with:
-          token: ${{ github.token }}
-          working-directory: userspace/ksud
-
-      - uses: LoliGothick/rustfmt-check@master
-        with:
-          token: ${{ github.token }}
-          working-directory: userspace/ksuinit
+      # Keep the native Rustfmt check as a real blocking gate. The previous
+      # JS wrapper crashed on Node 24 even when cargo fmt reported no changes.
+      - name: Check both Rust workspaces with cargo fmt
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +nightly fmt --all --manifest-path userspace/ksud/Cargo.toml -- --check
+          cargo +nightly fmt --all --manifest-path userspace/ksuinit/Cargo.toml -- --check
 
   clippy:
     name: Clippy check

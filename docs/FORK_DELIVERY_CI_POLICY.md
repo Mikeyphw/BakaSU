@@ -52,3 +52,22 @@ register and pass on the exact **new PR HEAD**; old-fork runs,
 receipts and PR numbers never qualify the new GitHub repository.
 Use native Devtool delivery status/ci against the new session.
 Do not treat CI, debug artifacts, signing or device tests as interchangeable.
+
+## Rust formatting workflow: maintained blocking gate
+
+The required `Lints Check` workflow keeps the job name `Rustfmt check` and
+checks both `userspace/ksud` and `userspace/ksuinit` with **direct**
+`cargo +nightly fmt --all --manifest-path ... -- --check` commands.
+The shell exits on any formatter failure; the third-party
+`LoliGothick/rustfmt-check@master` JavaScript wrapper was removed after a
+PR-only Node runtime `TypeError` (Actions run `43929420726`, job
+`133517549139`) obscured the actual formatter result.
+No Rust formatting, lint, Android or security assurance is waived.
+`test_rustfmt_ci_contract.py` is discovered by the existing hosted
+`test_*.py` suite and includes negative cases for missing workspaces,
+missing `--check`, suppressed exit status, removed required jobs and return of
+the obsolete wrapper. The required workflow's provider ID and trigger remain
+unchanged. A passing push run does not replace a failing PR run; qualify the
+**new** PR HEAD only after both required workflows complete successfully.
+F06 persistent-key signing, releases and physical device validation are
+separate milestones and are not established by this CI repair.
