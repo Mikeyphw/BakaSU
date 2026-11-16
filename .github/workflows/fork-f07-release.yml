@@ -1,0 +1,63 @@
+name: Fork F07 — Reviewed Signed Manager Release
+
+# No automatic publication. Run only after a reviewed registry entry and a
+# green F06 signed qualification run on this fork's default branch.
+on:
+  workflow_dispatch:
+    inputs:
+      f06_run_id:
+        description: Exact successful F06 workflow run ID
+        required: true
+        type: string
+      tag:
+        description: Reviewed f07-v* release tag from config/fork-release-review.json
+        required: true
+        type: string
+      channel:
+        description: Same reviewed stable/beta channel as the F06 run
+        required: true
+        type: choice
+        options: [beta, stable]
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: fork-f07-release
+  cancel-in-progress: false
+
+jobs:
+  reviewed-release:
+    if: github.repository == 'Mikeyphw/BakaSU' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: fork-release
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact fork main, never persist credentials
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify source and review contracts before release
+        run: |
+          python3 -B scripts/fork/source_contract.py --check
+          python3 -B -m unittest discover -s scripts/fork/tests -p 'test_*.py' -v
+      - name: Verify Java Android SDK build tools
+        run: |
+          test -n "${ANDROID_HOME:-}"
+          test -d "$ANDROID_HOME/build-tools"
+      - name: Source-bound F06 artifact review and controlled release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          F06_RUN_ID: ${{ inputs.f06_run_id }}
+          F07_TAG: ${{ inputs.tag }}
+          F07_CHANNEL: ${{ inputs.channel }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B scripts/fork/f07_release.py \
+            --f06-run-id "$F06_RUN_ID" \
+            --tag "$F07_TAG" \
+            --channel "$F07_CHANNEL" \
+            --publish
