@@ -1,0 +1,38 @@
+name: Fork Upstream Discovery (F04)
+
+# Scheduled workflows only run from the default branch after the PR is merged.
+# This phase is intentionally discovery-only. No auto merges/build dispatch/releases.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bakasu-fork-upstream-discovery
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate discovery contracts
+        run: python3 -B -m unittest discover -s scripts/fork/tests -p 'test_f04_*.py' -v
+      - name: Discover source-pinned upstream events
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 -B scripts/fork/upstream_events.py \
+            --lookback-days 7 \
+            --output fork-upstream-candidates.json
+      - name: Upload read-only discovery report
+        uses: actions/upload-artifact@v7
+        with:
+          name: fork-upstream-candidates-${{ github.run_id }}
+          path: fork-upstream-candidates.json
+          retention-days: 30
+          if-no-files-found: error
