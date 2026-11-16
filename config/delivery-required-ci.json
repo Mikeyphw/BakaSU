@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "repository": "Mikeyphw/BakaSU",
+  "base_branch": "main",
+  "event": "pull_request",
+  "release_qualification": "separate",
+  "required_workflows": [
+    {
+      "name": "Fork Manager Baseline Qualification",
+      "workflow_id": 419472937
+    },
+    {
+      "name": "Lints Check",
+      "workflow_id": 419472876
+    }
+  ]
+}

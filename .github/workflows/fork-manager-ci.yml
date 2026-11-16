@@ -2,15 +2,6 @@ name: Fork Manager Baseline Qualification
 
 on:
   pull_request:
-    paths:
-      - '.github/workflows/fork-manager-ci.yml'
-      - '.github/workflows/fork-upstream-discovery.yml'
-      - '.github/workflows/fork-source-build.yml'
-      - 'docs/FORK_F05_AUTOBUILD.md'
-      - 'docs/FORK_F04_UPSTREAM_DISCOVERY.md'
-      - 'manager/**'
-      - 'scripts/fork/**'
-      - 'docs/FORK_DELIVERY.md'
   workflow_dispatch:
 
 permissions:
