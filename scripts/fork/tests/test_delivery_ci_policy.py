@@ -2,7 +2,6 @@
 from pathlib import Path
 import json
 import re
-import stat
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -22,8 +21,8 @@ class CommittedRequiredCIContracts(unittest.TestCase):
         self.assertEqual(raw["event"], "pull_request")
         self.assertEqual(raw["release_qualification"], "separate")
         self.assertEqual(raw["required_workflows"], [
-            {"name": "Fork Manager Baseline Qualification", "workflow_id": 419472937},
-            {"name": "Lints Check", "workflow_id": 419472876},
+            {"name": "Fork Manager Baseline Qualification", "workflow_id": 420307178},
+            {"name": "Lints Check", "workflow_id": 420303004},
         ])
         self.assertEqual(len({x["workflow_id"] for x in raw["required_workflows"]}), 2)
 
