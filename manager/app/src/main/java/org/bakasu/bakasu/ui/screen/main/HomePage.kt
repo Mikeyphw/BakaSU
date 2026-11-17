@@ -410,7 +410,11 @@ private fun ManagerUpdateCard(update: ManagerUpdateInfo?, kernelStatus: KernelSt
 
 @Composable
 private fun ManagerUpdateCardContent(updateInfo: ManagerUpdateInfo, kernelStatus: KernelStatus) {
-    val compatibility = if (updateInfo.channel == ManagerUpdateChannel.BETA) {
+    // A stable build is no safer than a beta when candidate metadata is absent.
+    val compatibility = if (updateInfo.expectedApkSha256 == null ||
+        updateInfo.expectedApkSizeBytes == null) {
+        ManagerCompatibilityVerdict.UNKNOWN
+    } else {
         evaluateManagerCompatibility(
             updateInfo.compatibilityRequirements,
             kernelStatus.isManager,
@@ -418,8 +422,6 @@ private fun ManagerUpdateCardContent(updateInfo: ManagerUpdateInfo, kernelStatus
             kernelStatus.kernelUAPIVersion,
             kernelStatus.ksuVersion,
         )
-    } else {
-        ManagerCompatibilityVerdict.COMPATIBLE
     }
     if (compatibility != ManagerCompatibilityVerdict.COMPATIBLE) {
         WarningCard(
@@ -473,40 +475,32 @@ private fun ManagerUpdateCardContent(updateInfo: ManagerUpdateInfo, kernelStatus
     }
     val updateDialog = rememberConfirmDialog(
         onConfirm = {
-            if (updateInfo.channel == ManagerUpdateChannel.BETA) {
-                scope.launch {
-                    val freshStatus = runCatching { getKernelStatus() }.getOrNull()
-                    val currentVerdict = freshStatus?.let { status ->
-                        evaluateManagerCompatibility(
-                            updateInfo.compatibilityRequirements,
-                            status.isManager,
-                            status.isRootAvailable,
-                            status.kernelUAPIVersion,
-                            status.ksuVersion,
-                        )
-                    }
-                    if (currentVerdict == ManagerCompatibilityVerdict.COMPATIBLE) {
-                        downloadManagerUpdate(
-                            context,
-                            permissionRequestInterface,
-                            updateInfo,
-                            enqueueManagerUpdate,
-                        )
-                    } else {
-                        Toast.makeText(
-                            context,
-                            R.string.manager_beta_changed,
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    }
+            // Recheck immediately before download for BOTH release channels.
+            scope.launch {
+                val freshStatus = runCatching { getKernelStatus() }.getOrNull()
+                val currentVerdict = freshStatus?.let { status ->
+                    evaluateManagerCompatibility(
+                        updateInfo.compatibilityRequirements,
+                        status.isManager,
+                        status.isRootAvailable,
+                        status.kernelUAPIVersion,
+                        status.ksuVersion,
+                    )
                 }
-            } else {
-                downloadManagerUpdate(
-                    context,
-                    permissionRequestInterface,
-                    updateInfo,
-                    enqueueManagerUpdate,
-                )
+                if (currentVerdict == ManagerCompatibilityVerdict.COMPATIBLE) {
+                    downloadManagerUpdate(
+                        context,
+                        permissionRequestInterface,
+                        updateInfo,
+                        enqueueManagerUpdate,
+                    )
+                } else {
+                    Toast.makeText(
+                        context,
+                        R.string.manager_beta_changed,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
         },
     )

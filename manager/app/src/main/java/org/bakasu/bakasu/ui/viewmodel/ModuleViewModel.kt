@@ -133,7 +133,7 @@ class ModuleViewModel(
 
     suspend fun resolveReinstall(module: InstalledModule): ModuleUpdateVerification {
         val candidate = module.moduleReinstall ?: return ModuleUpdateVerification.Rejected
-        if (module.remove || module.update || candidate.versionCode != module.versionCode) {
+        if (module.remove || module.update || candidate.versionCode < module.versionCode) {
             return ModuleUpdateVerification.Rejected
         }
         return resolveModuleUpdate(module.id, module.updateJson, candidate.zipUrl, candidate.versionCode)
@@ -152,7 +152,7 @@ class ModuleViewModel(
                 installed.updateJson == module.updateJson &&
                 installed.moduleReinstall != null &&
                 installed.moduleReinstall == module.moduleReinstall &&
-                installed.moduleReinstall.versionCode == module.versionCode
+                installed.moduleReinstall.versionCode >= module.versionCode
         }
     }
 

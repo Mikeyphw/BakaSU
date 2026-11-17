@@ -21,6 +21,10 @@ The independent verifier `scripts/fork/f08_qualification.py` requires:
 - a successful manual F06 run from the fork's own main with the exact workflow
   path, source SHA, and run attempt, plus a publicly published F07 tag;
 - an F07 source merge commit that remains an ancestor of the audited fork main;
+- the actual fork Git tag ref must still point at that reviewed source commit, not
+  merely carry a matching `target_commitish` field in release metadata;
+- require GitHub-provided `sha256:` digests for every APK and JSON metadata
+  asset; absent, malformed or mismatched digests refuse release qualification;
 - exact GitHub asset inventory, byte lengths, separately attested APK SHA-256s
   **cross-checked against the original F06 signed APK attestation**,
   version code and compatible ABI, with no extra or duplicate APKs;

@@ -16,7 +16,7 @@ class ReinstallSourceContract(unittest.TestCase):
     def test_exact_version_candidate_separate_from_update(self):
         r = src('manager/app/src/main/java/org/bakasu/bakasu/data/module/ModuleRepository.kt')
         self.assertIn('candidate?.takeIf { it.versionCode > module.versionCode }', r)
-        self.assertIn('it.versionCode == module.versionCode', r)
+        self.assertIn('it.versionCode >= module.versionCode', r)
         self.assertIn('isSecureReinstallZipUrl(it.zipUrl)', r)
         self.assertIn('uri.scheme.equals("https", ignoreCase = true)', r)
         self.assertIn('cached?.moduleUpdate ?: cached?.moduleReinstall', r)
@@ -40,7 +40,9 @@ class ReinstallSourceContract(unittest.TestCase):
         self.assertIn('module_reinstall_unverified', p)
         self.assertIn('if (confirmResult != ConfirmResult.Confirmed)', p)
         self.assertIn('expected = registry?.expected', p)
-        self.assertIn('if (canInstall()) onUpdateModule(uri)', p)
+        self.assertIn('onUpdateModule(', p)
+        self.assertIn('module.takeIf { reinstall }', p)
+        self.assertIn('reinstallModuleId', (ROOT/'manager/app/src/main/java/org/bakasu/bakasu/ui/screen/Flash.kt').read_text())
         self.assertIn('reinstallUrl.isNotEmpty() && !module.remove && !module.update', p)
 
     def test_preview_and_localization(self):

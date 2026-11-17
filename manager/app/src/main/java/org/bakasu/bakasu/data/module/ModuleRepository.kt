@@ -81,7 +81,7 @@ class ModuleRepository(
                                     moduleUpdate = candidate?.takeIf { it.versionCode > module.versionCode },
                                     moduleReinstall = candidate?.takeIf {
                                         !module.remove && !module.update &&
-                                            it.versionCode == module.versionCode &&
+                                            it.versionCode >= module.versionCode &&
                                             isSecureReinstallZipUrl(it.zipUrl)
                                     },
                                 )

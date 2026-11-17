@@ -59,6 +59,8 @@
     <string name="profile_selinux_rules">Regras</string>
     <string name="module_update">Atualizar</string>
     <string name="module_reinstall">Reinstalar</string>
+    <string name="module_reinstall_latest">Instalar ZIP mais recente</string>
+    <string name="module_reinstall_latest_explanation">O ZIP da versão instalada não está disponível na URL de atualização. Este ZIP é de outra versão, mais recente, e não corresponde a uma reinstalação exata. Confira a versão antes de continuar.</string>
     <string name="module_reinstall_confirm">Reinstalar %1$s (versão %2$s) usando o ZIP de atualização publicado? O módulo será gravado novamente e poderá ser necessário reiniciar.</string>
     <string name="module_reinstall_verified">O ZIP será validado com os metadados de lançamento e SHA-256 do repositório antes da instalação.</string>
     <string name="module_reinstall_unverified">Este ZIP foi fornecido pelo autor, sem verificação SHA-256 pelo repositório. Prossiga somente se confiar na origem.</string>

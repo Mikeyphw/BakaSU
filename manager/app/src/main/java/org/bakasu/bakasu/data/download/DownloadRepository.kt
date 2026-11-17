@@ -66,16 +66,28 @@ class DownloadRepository(
     fun enqueueManagerUpdate(update: ManagerUpdateInfo): Int {
         synchronized(enqueueLock) {
             val url = update.source.url
-            val existing = _downloads.value.values.find {
-                it.url == url && it.expected == null && (it.status == DownloadStatus.PENDING || it.status == DownloadStatus.DOWNLOADING)
-            }
-            if (existing != null) return existing.id
-
+            // Explicitly create a new security context for every selected
+            // manager release; do not reuse a download with unknown proof.
             val id = idCounter.incrementAndGet()
             _downloads.update {
                 it + (id to DownloadState(id = id, fileName = update.fileName, url = url))
             }
+            val proof = update.expectedApkSha256
+            val length = update.expectedApkSizeBytes
+            val compat = update.compatibilityRequirements
+            if (proof == null || !proof.matches(Regex("[a-f0-9]{64}")) ||
+                length == null || length <= 100_000L || length > 1_073_741_824L ||
+                compat == null || compat.managerUapi <= 0 || compat.minimumKernelSuVersion <= 0 ||
+                update.source !is ManagerApkSource.DirectApk) {
+                markFailed(id, "Unsigned or incomplete fork release evidence")
+                return id
+            }
             val intent = Intent(application, DownloadService::class.java).apply {
+                putExtra(DownloadService.EXTRA_EXPECTED_SHA256, proof)
+                putExtra(DownloadService.EXTRA_EXPECTED_SIZE, length)
+                putExtra(DownloadService.EXTRA_MANAGER_EXPECTED_VERSION_CODE, update.versionCode)
+                putExtra(DownloadService.EXTRA_MANAGER_UAPI, compat.managerUapi)
+                putExtra(DownloadService.EXTRA_MANAGER_KSU_MIN, compat.minimumKernelSuVersion)
                 action = DownloadService.ACTION_DOWNLOAD_MANAGER_APK
                 putExtra(DownloadService.EXTRA_DOWNLOAD_ID, id)
                 putExtra(DownloadService.EXTRA_URL, url)

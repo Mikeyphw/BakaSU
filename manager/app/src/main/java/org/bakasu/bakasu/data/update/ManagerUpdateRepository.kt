@@ -40,6 +40,8 @@ class ManagerUpdateRepository(
         val supportedAbis = Build.SUPPORTED_ABIS.toList()
         val release = requestJson("https://api.github.com/repos/$REPOSITORY/releases/latest")
             ?: return@withContext null
+        if (!release.optString("tag_name").startsWith("f07-v") || release.optBoolean("draft") ||
+            release.optBoolean("prerelease")) return@withContext null
         val changelog = release.optString("body")
         val assets = release.optJSONArray("assets") ?: return@withContext null
         val candidates = mutableListOf<ManagerApkCandidate>()
@@ -56,11 +58,15 @@ class ManagerUpdateRepository(
                 abi = parsed.abi,
                 fileName = parsed.fileName,
                 source = ManagerApkSource.DirectApk(downloadUrl),
+                expectedSha256 = releaseSha256(asset),
+                expectedSizeBytes = asset.optLong("size", -1L),
             )
         }
 
-        return@withContext selectCandidate(candidates, supportedAbis)
-            ?.toUpdateInfo(ManagerUpdateChannel.STABLE, changelog)
+        val candidate = selectCandidate(candidates, supportedAbis) ?: return@withContext null
+        val requirements = resolvePublishedCompatibility(assets, candidate)
+        return@withContext candidate.toUpdateInfo(ManagerUpdateChannel.STABLE, changelog)
+            .copy(compatibilityRequirements = requirements)
     }
 
     // Only published APKs from this fork are candidates. An upstream workflow
@@ -72,7 +78,8 @@ class ManagerUpdateRepository(
             ?: return@withContext null
         for (releaseIndex in 0 until releases.length()) {
             val release = releases.optJSONObject(releaseIndex) ?: continue
-            if (!release.optBoolean("prerelease") || release.optBoolean("draft")) continue
+            if (!release.optBoolean("prerelease") || release.optBoolean("draft") ||
+                !release.optString("tag_name").startsWith("f07-v")) continue
             val assets = release.optJSONArray("assets") ?: continue
             val candidates = mutableListOf<ManagerApkCandidate>()
             for (index in 0 until assets.length()) {
@@ -86,6 +93,8 @@ class ManagerUpdateRepository(
                     abi = parsed.abi,
                     fileName = parsed.fileName,
                     source = ManagerApkSource.DirectApk(url),
+                    expectedSha256 = releaseSha256(asset),
+                    expectedSizeBytes = asset.optLong("size", -1L),
                 )
             }
             val candidate = selectCandidate(candidates, supportedAbis) ?: continue
@@ -185,6 +194,10 @@ class ManagerUpdateRepository(
         )
     }
 
+    private fun releaseSha256(asset: JSONObject): String? = asset.optString("digest")
+        .takeIf { it.matches(Regex("sha256:[a-f0-9]{64}")) }
+        ?.removePrefix("sha256:")
+
     private fun selectCandidate(
         candidates: List<ManagerApkCandidate>,
         supportedAbis: List<String>,
@@ -212,6 +225,8 @@ class ManagerUpdateRepository(
         val abi: String,
         val fileName: String,
         val source: ManagerApkSource,
+        val expectedSha256: String?,
+        val expectedSizeBytes: Long,
     ) {
         fun toUpdateInfo(
             channel: ManagerUpdateChannel,
@@ -224,6 +239,8 @@ class ManagerUpdateRepository(
             fileName = fileName,
             source = source,
             changelog = changelog,
+            expectedApkSha256 = expectedSha256,
+            expectedApkSizeBytes = expectedSizeBytes.takeIf { it > 100_000L },
         )
     }
 }

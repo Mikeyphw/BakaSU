@@ -126,6 +126,8 @@
     <string name="profile_selinux_rules">Rules</string>
     <string name="module_update">Update</string>
     <string name="module_reinstall">Reinstall</string>
+    <string name="module_reinstall_latest">Install latest ZIP instead</string>
+    <string name="module_reinstall_latest_explanation">The installed version\'s ZIP is not available through the module\'s update URL. This is a different, newer version, not an exact reinstall. Review the target version before continuing.</string>
     <string name="module_reinstall_confirm">Reinstall %1$s (version %2$s) using the published update ZIP? This flashes the module again and may require a reboot.</string>
     <string name="module_reinstall_verified">The ZIP will be checked against the module registry release metadata and SHA-256 before flashing.</string>
     <string name="module_reinstall_unverified">This is an author-provided ZIP without registry-backed SHA-256 verification. Proceed only if you trust its source.</string>

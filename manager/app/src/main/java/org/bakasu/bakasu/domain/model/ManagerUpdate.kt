@@ -26,4 +26,6 @@ data class ManagerUpdateInfo(
     val source: ManagerApkSource,
     val changelog: String = "",
     val compatibilityRequirements: ManagerCompatibilityRequirements? = null,
+    val expectedApkSha256: String? = null,
+    val expectedApkSizeBytes: Long? = null,
 )

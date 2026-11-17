@@ -467,8 +467,21 @@ fun ModulePage(bottomPadding: Dp) {
                     uiState = uiState,
                     listState = listState,
                     modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-                    onUpdateModule = {
-                        navigator.push(Route.Flash.moduleUpdate(it.toString()))
+                    onUpdateModule = { uri, reinstallModule, expectedSha256, expectedSize ->
+                        navigator.push(
+                            if (reinstallModule == null) {
+                                Route.Flash.moduleUpdate(uri.toString())
+                            } else {
+                                Route.Flash.moduleReinstall(
+                                    uri.toString(),
+                                    reinstallModule.id,
+                                    reinstallModule.versionCode,
+                                    reinstallModule.enabled,
+                                    expectedSha256,
+                                    expectedSize,
+                                )
+                            },
+                        )
                     },
                     onClickModule = { id, hasWebUi ->
                         val currentTime = System.currentTimeMillis()
@@ -596,7 +609,7 @@ private fun ModuleList(
     listState: LazyListState,
     modifier: Modifier = Modifier,
     boxModifier: Modifier = Modifier,
-    onUpdateModule: (Uri) -> Unit,
+    onUpdateModule: (Uri, InstalledModule?, String?, Long?) -> Unit,
     onClickModule: (id: String, hasWebUi: Boolean) -> Unit,
     context: Context,
     snackBarHost: SnackbarHostState,
@@ -816,11 +829,20 @@ private fun ModuleList(
             } else {
                 context.getString(R.string.module_reinstall_verified)
             }
+            val latestFallback = module.moduleReinstall?.versionCode != module.versionCode
+            val label = context.getString(
+                if (latestFallback) R.string.module_reinstall_latest else R.string.module_reinstall,
+            )
             confirmDialog.awaitConfirm(
-                context.getString(R.string.module_reinstall),
-                content = context.getString(R.string.module_reinstall_confirm, module.name, module.version) +
-                    "\n\n" + warning,
-                confirm = context.getString(R.string.module_reinstall),
+                label,
+                content = context.getString(
+                    R.string.module_reinstall_confirm,
+                    module.name,
+                    module.moduleReinstall?.version ?: module.version,
+                ) + "\n\n" +
+                    (if (latestFallback) context.getString(R.string.module_reinstall_latest_explanation) + "\n\n" else "") +
+                    warning,
+                confirm = label,
             )
         } else {
             val changelogResult = if (registry != null) {
@@ -870,7 +892,14 @@ private fun ModuleList(
                 canEnqueue = canInstall,
                 onFailed = { failed -> Toast.makeText(context, downloadFailureMessage(context, failed), Toast.LENGTH_LONG).show() },
                 onDownloaded = { uri ->
-                    if (canInstall()) onUpdateModule(uri)
+                    if (canInstall()) {
+                        onUpdateModule(
+                            uri,
+                            module.takeIf { reinstall },
+                            registry?.expected?.sha256,
+                            registry?.expected?.size,
+                        )
+                    }
                 },
                 onDownloading = {
                     launch(Dispatchers.Main) {
@@ -1598,7 +1627,13 @@ fun ModuleItem(
                                 .size(20.dp)
                                 .padding(12.dp, 7.dp, 12.dp, 7.dp),
                             imageVector = Icons.TwoTone.Refresh,
-                            contentDescription = stringResource(R.string.module_reinstall),
+                            contentDescription = stringResource(
+                                if (module.moduleReinstall?.versionCode != module.versionCode) {
+                                    R.string.module_reinstall_latest
+                                } else {
+                                    R.string.module_reinstall
+                                },
+                            ),
                         )
                     }
                 }

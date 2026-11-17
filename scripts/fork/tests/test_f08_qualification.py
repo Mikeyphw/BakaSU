@@ -56,6 +56,7 @@ class Fixture:
         self.run = {'id':RUN,'event':'workflow_dispatch','status':'completed','conclusion':'success',
                     'head_branch':'main','head_sha':FORK,
                     'head_repository':{'full_name':f08.REPO},'run_attempt':1,'path':f08.RUN_PATH}
+        self.tag_ref = {'ref':'refs/tags/'+TAG, 'object':{'type':'commit','sha':HEAD}}
         self.release = {'tag_name':TAG,'draft':False,'prerelease':True,
                         'published_at':'2026-11-16T20:00:00Z',
                         'target_commitish':HEAD,'author':{'login':'operator'},
@@ -70,7 +71,10 @@ class Fixture:
         for name, row in (('f07-release-provenance.json',self.provenance),
                           ('manager-compatibility.json',self.compat)):
             (self.assets/name).write_text(json.dumps(row)+'\n',encoding='utf-8')
-        self.release['assets']=[{'name':p.name,'size':p.stat().st_size} for p in self.assets.iterdir()]
+        self.release['assets']=[{
+            'name':p.name, 'size':p.stat().st_size,
+            'digest':'sha256:'+hashlib.sha256(p.read_bytes()).hexdigest(),
+        } for p in self.assets.iterdir()]
 
     def audit(self, *, checker=None, ancestor=None):
         row={'fileName':APK,'sha256':self.sha,'sizeBytes':len(self.apk_data),
@@ -78,6 +82,7 @@ class Fixture:
              'signerCertificateSha256':CERT}
         return f08.check_release(TAG,self.release,self.registry,self.provenance,self.run,
                 self.compat,self.f06,self.assets,head=HEAD,sdk=self.root/'sdk',
+                tag_ref=self.tag_ref,
                 ancestor=ancestor or (lambda merged,main: merged == HEAD and main == HEAD),
                 apk_checker=checker or (lambda *args: row))
 
@@ -180,6 +185,53 @@ class PublishedReleaseAuditTests(unittest.TestCase):
             with self.assertRaises(f08.Refused):f.audit()
         self.with_fixture(check)
 
+    def test_actual_git_tag_must_point_to_reviewed_source_commit(self):
+        def check(f):
+            self.assertEqual(f.audit()['sourceMergedSha'],HEAD)
+            for key,value in [('ref','refs/tags/f07-vdifferent'),('object',{'type':'commit','sha':FORK}),
+                              ('object',{'type':'tag','sha':HEAD}),('object',{'type':'blob','sha':HEAD})]:
+                saved=f.tag_ref[key];f.tag_ref[key]=value
+                with self.subTest(key=key,value=value),self.assertRaisesRegex(
+                        f08.Refused,'F08_GIT_TAG_REFERENCE_NOT_REVIEWED_SOURCE_COMMIT'):
+                    f.audit()
+                f.tag_ref[key]=saved
+        self.with_fixture(check)
+
+    def test_github_release_asset_sha256_digests_cover_metadata_and_apks(self):
+        def check(f):
+            for row in f.release['assets']:
+                raw = (f.assets / row['name']).read_bytes()
+                row['digest'] = 'sha256:' + hashlib.sha256(raw).hexdigest()
+            report = f.audit()
+            self.assertTrue(report['githubAssetDigestCoverageComplete'])
+            self.assertEqual(report['githubAssetDigestsChecked'], len(f.release['assets']))
+            f.release['assets'][0]['digest'] = 'sha256:' + ('0' * 64)
+            with self.assertRaisesRegex(f08.Refused, 'F08_GITHUB_ASSET_DIGEST_DRIFT'):
+                f.audit()
+            f.release['assets'][0]['digest'] = 'MD5:incorrect'
+            with self.assertRaisesRegex(f08.Refused, 'F08_GITHUB_ASSET_DIGEST_FORMAT_INVALID'):
+                f.audit()
+            # Metadata files are independently hashed, not just the APKs.
+            for row in f.release['assets']:
+                raw = (f.assets / row['name']).read_bytes()
+                row['digest'] = 'sha256:' + hashlib.sha256(raw).hexdigest()
+            meta = f.assets / 'manager-compatibility.json'
+            raw = meta.read_bytes()
+            meta.write_bytes(b'X' + raw[1:])
+            with self.assertRaisesRegex(f08.Refused, 'F08_GITHUB_ASSET_DIGEST_DRIFT'):
+                f.audit()
+        self.with_fixture(check)
+
+    def test_absent_github_asset_digest_refused(self):
+        def check(f):
+            for item in f.release['assets']:
+                original = item.pop('digest')
+                with self.assertRaisesRegex(f08.Refused, 'F08_GITHUB_ASSET_DIGEST_MISSING'):
+                    f.audit()
+                item['digest'] = original
+            self.assertTrue(f.audit()['githubAssetDigestCoverageComplete'])
+        self.with_fixture(check)
+
     def test_readonly_workflow_has_strict_no_publish_no_secrets(self):
         script=(ROOT/'.github/workflows/fork-f08-release-qualification.yml').read_text()
         self.assertIn('workflow_dispatch:',script)
@@ -188,6 +240,8 @@ class PublishedReleaseAuditTests(unittest.TestCase):
         self.assertIn('contents: read',script)
         self.assertIn('actions: read',script)
         self.assertIn('f08_qualification.py',script)
+        self.assertIn('git/ref/tags/$F08_TAG',script)
+        self.assertIn('--tag-ref-json',script)
         for forbidden in ('  pull_request:', '  push:', '  schedule:',
                           'contents: write','gh release create','gh release edit',
                           'gh release upload', 'secrets.FORK_SIGNER_KEYSTORE_B64',

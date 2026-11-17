@@ -44,6 +44,7 @@ jobs:
           [[ "$F08_TAG" =~ ^f07-v[0-9][A-Za-z0-9._-]{0,75}$ ]]
           mkdir -p "$RUNNER_TEMP/f08/assets"
           gh api "repos/Mikeyphw/BakaSU/releases/tags/$F08_TAG" > "$RUNNER_TEMP/f08/release.json"
+          gh api "repos/Mikeyphw/BakaSU/git/ref/tags/$F08_TAG" > "$RUNNER_TEMP/f08/tag-ref.json"
           gh release download "$F08_TAG" -R Mikeyphw/BakaSU \
             -D "$RUNNER_TEMP/f08/assets"
           F08_RUN_ID="$(python3 - "$RUNNER_TEMP/f08/assets/f07-release-provenance.json" <<'PY'
@@ -75,6 +76,7 @@ jobs:
             --tag "$F08_TAG" \
             --assets "$RUNNER_TEMP/f08/assets" \
             --release-json "$RUNNER_TEMP/f08/release.json" \
+            --tag-ref-json "$RUNNER_TEMP/f08/tag-ref.json" \
             --f06-run-json "$RUNNER_TEMP/f08/f06-run.json" \
             --f06-evidence "$RUNNER_TEMP/f08/f06-evidence/f06-signed-provenance.json" \
             --report "$RUNNER_TEMP/f08/qualification.json"

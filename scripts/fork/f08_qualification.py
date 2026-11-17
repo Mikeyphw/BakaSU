@@ -72,7 +72,7 @@ def committed_ancestor(merged: str, head: str) -> bool:
 
 def check_release(tag: str, release: dict, registry: dict, provenance: dict,
                   run: dict, compat: dict, f06: dict, assets: Path, *, head: str,
-                  sdk: Path, ancestor=committed_ancestor,
+                  sdk: Path, tag_ref: dict, ancestor=committed_ancestor,
                   apk_checker=apk_metadata) -> dict:
     require(isinstance(tag, str) and TAG.fullmatch(tag) and SHA.fullmatch(head),
             'F08_TAG_OR_HEAD_INVALID')
@@ -111,6 +111,13 @@ def check_release(tag: str, release: dict, registry: dict, provenance: dict,
             (release.get('author') or {}).get('login') and
             isinstance(release.get('assets'), list),
             'F08_PUBLIC_RELEASE_IDENTITY_INVALID')
+    # gh release create --target creates the fork's lightweight Git tag.
+    # target_commitish alone cannot detect a subsequently moved tag.
+    require(isinstance(tag_ref, dict) and tag_ref.get('ref') == 'refs/tags/' + tag
+            and isinstance(tag_ref.get('object'), dict) and
+            tag_ref['object'].get('type') == 'commit' and
+            tag_ref['object'].get('sha') == entry['sourceMergedSha'],
+            'F08_GIT_TAG_REFERENCE_NOT_REVIEWED_SOURCE_COMMIT')
     require(isinstance(f06, dict) and f06.get('schemaVersion') == 1 and
             f06.get('status') == 'signed-verified' and
             f06.get('mode') == 'F06-signed-artifact-not-a-release' and
@@ -159,6 +166,20 @@ def check_release(tag: str, release: dict, registry: dict, provenance: dict,
     gh_by_name = {x['name']: x for x in github_assets}
     require(all((assets / name).stat().st_size == gh_by_name[name]['size'] for name in expected),
             'F08_GITHUB_ASSET_SIZE_MISMATCH')
+    # Every published APK and metadata asset must include an authoritative GitHub
+    # sha256 digest, in addition to the original F06 independent provenance.
+    # Absent digest must never produce a passing release-audit receipt.
+    github_asset_digests = 0
+    for asset_name in sorted(expected):
+        stated = gh_by_name[asset_name].get('digest')
+        require(stated is not None,
+                'F08_GITHUB_ASSET_DIGEST_MISSING_'+asset_name)
+        require(isinstance(stated, str) and
+                re.fullmatch(r'sha256:[0-9a-f]{64}', stated) is not None,
+                'F08_GITHUB_ASSET_DIGEST_FORMAT_INVALID_'+asset_name)
+        require(stated == 'sha256:' + hash_file(assets / asset_name),
+                'F08_GITHUB_ASSET_DIGEST_DRIFT_'+asset_name)
+        github_asset_digests += 1
     compat_rows = compat['apks']
     require(len(compat_rows) == len(names) and all(isinstance(x, dict) for x in compat_rows),
             'F08_COMPATIBILITY_ROWS_INVALID')
@@ -226,7 +247,10 @@ def check_release(tag: str, release: dict, registry: dict, provenance: dict,
             'forkMainAuditSha': head, 'certificateSha256': signer,
             'managerPackage': PACKAGE, 'apks': checked,
             'reviewedCompatibility': True, 'signedApksReverified': True,
-            'publishedAssetIntegrity': True, 'deviceQualified': False,
+            'publishedAssetIntegrity': True,
+            'githubAssetDigestsChecked': github_asset_digests,
+            'githubAssetDigestCoverageComplete': github_asset_digests == len(expected),
+            'deviceQualified': False,
             'rootDaemonAuthorized': False, 'releaseBuildPerformed': False}
 
 
@@ -236,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument('--assets', type=Path, required=True)
     p.add_argument('--release-json', type=Path, required=True)
     p.add_argument('--f06-run-json', type=Path, required=True)
+    p.add_argument('--tag-ref-json', type=Path, required=True)
     p.add_argument('--f06-evidence', type=Path, required=True)
     p.add_argument('--report', type=Path, required=True)
     p.add_argument('--sdk', type=Path, default=Path(os.getenv('ANDROID_HOME') or os.getenv('ANDROID_SDK_ROOT') or '/no-sdk'))
@@ -250,9 +275,10 @@ def main(argv: list[str] | None = None) -> int:
         compat = read_json_file(args.assets/'manager-compatibility.json')
         release = read_json_file(args.release_json)
         run = read_json_file(args.f06_run_json)
+        tag_ref = read_json_file(args.tag_ref_json)
         f06 = read_json_file(args.f06_evidence)
         report = check_release(args.tag, release, registry, provenance, run, compat, f06,
-                               args.assets, head=head, sdk=args.sdk)
+                               args.assets, head=head, sdk=args.sdk, tag_ref=tag_ref)
         # Output is non-authorizing evidence. Exclusive creation prevents
         # a stale/foreign audit from being overwritten and misattributed.
         import stat

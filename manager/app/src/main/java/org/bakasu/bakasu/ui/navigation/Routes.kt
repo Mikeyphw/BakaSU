@@ -96,6 +96,11 @@ sealed interface Route :
         val allowShell: Boolean = false,
         val enableAdb: Boolean = false,
         val forceBackup: Boolean = false,
+        val reinstallModuleId: String? = null,
+        val reinstallVersionCode: Int? = null,
+        val reinstallWasEnabled: Boolean? = null,
+        val reinstallSha256: String? = null,
+        val reinstallSize: Long? = null,
     ) : Route {
         companion object {
             const val TYPE_BOOT = "boot"
@@ -130,6 +135,22 @@ sealed interface Route :
             fun modules(uris: List<String>, currentIndex: Int = 0) = Flash(TYPE_MODULES, uris = uris, currentIndex = currentIndex)
 
             fun moduleUpdate(uri: String) = Flash(TYPE_MODULE_UPDATE, uris = listOf(uri))
+            fun moduleReinstall(
+                uri: String,
+                moduleId: String,
+                versionCode: Int,
+                wasEnabled: Boolean,
+                sha256: String?,
+                size: Long?,
+            ) = Flash(
+                TYPE_MODULE_UPDATE,
+                uris = listOf(uri),
+                reinstallModuleId = moduleId,
+                reinstallVersionCode = versionCode,
+                reinstallWasEnabled = wasEnabled,
+                reinstallSha256 = sha256,
+                reinstallSize = size,
+            )
             fun restore() = Flash(TYPE_RESTORE)
             fun uninstall() = Flash(TYPE_UNINSTALL)
         }

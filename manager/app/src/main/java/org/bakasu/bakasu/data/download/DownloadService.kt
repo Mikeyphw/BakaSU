@@ -11,7 +11,6 @@ import android.os.Build
 import android.os.Environment
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -29,7 +28,6 @@ import kotlinx.coroutines.launch
 import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.bakasu.bakasu.BuildConfig
 import org.bakasu.bakasu.R
 import org.bakasu.bakasu.data.module.registry.DownloadVerificationException
 import org.bakasu.bakasu.data.module.registry.DownloadVerifier
@@ -37,6 +35,8 @@ import org.bakasu.bakasu.data.module.registry.RegistryDownloadStore
 import org.bakasu.bakasu.data.module.registry.RegistryUrls
 import org.bakasu.bakasu.data.settings.SettingsPlatformRepository
 import org.bakasu.bakasu.data.update.ManagerUpdateRepository
+import org.bakasu.bakasu.data.update.ManagerApkIntegrity
+import org.bakasu.bakasu.ui.ManagerInstallGuardActivity
 import org.bakasu.bakasu.data.update.ZipRangeArchive
 import org.bakasu.bakasu.domain.model.DownloadStatus
 import org.bakasu.bakasu.domain.model.DownloadVerificationFailure
@@ -66,6 +66,8 @@ class DownloadService : Service() {
         const val EXTRA_MANAGER_SOURCE = "managerSource"
         const val EXTRA_MANAGER_ABI = "managerAbi"
         const val EXTRA_MANAGER_EXPECTED_VERSION_CODE = "managerExpectedVersionCode"
+        const val EXTRA_MANAGER_UAPI = "managerRequiredUapi"
+        const val EXTRA_MANAGER_KSU_MIN = "managerMinimumKernelSuVersion"
         const val EXTRA_EXPECTED_SIZE = "expectedSize"
         const val EXTRA_EXPECTED_SHA256 = "expectedSha256"
 
@@ -137,12 +139,19 @@ class DownloadService : Service() {
                 )
                 val downloadId = intent.getIntExtra(EXTRA_DOWNLOAD_ID, -1)
                 if (downloadId == -1) return START_NOT_STICKY
-                if (source == SOURCE_NIGHTLY_ARTIFACT &&
-                    (preferredAbi.isNullOrBlank() || expectedVersionCode <= 0)
-                ) {
+                val expectedHash = intent.getStringExtra(EXTRA_EXPECTED_SHA256)
+                val expectedBytes = intent.getLongExtra(EXTRA_EXPECTED_SIZE, -1L)
+                val expectedManagerUapi = intent.getIntExtra(EXTRA_MANAGER_UAPI, -1)
+                val expectedKsuMinimum = intent.getIntExtra(EXTRA_MANAGER_KSU_MIN, -1)
+                if (source != SOURCE_DIRECT_APK ||
+                    !url.startsWith("https://github.com/Mikeyphw/BakaSU/releases/download/f07-v") ||
+                    expectedVersionCode <= 0 ||
+                    expectedHash == null || !expectedHash.matches(Regex("[a-f0-9]{64}")) ||
+                    expectedBytes <= 100_000L || expectedBytes > 1_073_741_824L ||
+                    expectedManagerUapi <= 0 || expectedKsuMinimum <= 0) {
+                    downloadRepository.markFailed(downloadId, "Unverified manager release metadata")
                     return START_NOT_STICKY
                 }
-
                 startForegroundDownload(downloadId, fileName)
                 startManagerApkDownload(
                     downloadId,
@@ -151,6 +160,10 @@ class DownloadService : Service() {
                     source,
                     preferredAbi,
                     expectedVersionCode,
+                    expectedHash,
+                    expectedBytes,
+                    expectedManagerUapi,
+                    expectedKsuMinimum,
                 )
             }
 
@@ -289,6 +302,10 @@ class DownloadService : Service() {
         source: String,
         preferredAbi: String?,
         expectedVersionCode: Int,
+        expectedHash: String,
+        expectedBytes: Long,
+        expectedManagerUapi: Int,
+        expectedKsuMinimum: Int,
     ) {
         val job = serviceScope.launch {
             val target = resolveAvailableTarget(
@@ -297,7 +314,7 @@ class DownloadService : Service() {
             )
             try {
                 when (source) {
-                    SOURCE_DIRECT_APK -> downloadUrlToTarget(id, url, target)
+                    SOURCE_DIRECT_APK -> downloadUrlToTarget(id, url, target, expectedBytes)
 
                     SOURCE_NIGHTLY_ARTIFACT -> {
                         val archive = ZipRangeArchive(httpClient)
@@ -314,18 +331,31 @@ class DownloadService : Service() {
                     else -> throw IOException("Unknown manager APK source")
                 }
 
+                // Refuse modified APK bytes, wrong package/version and signer drift.
+                ManagerApkIntegrity.verify(
+                    this@DownloadService,
+                    target,
+                    expectedHash,
+                    expectedBytes,
+                    expectedVersionCode,
+                )
                 val uri = Uri.fromFile(target)
                 downloadRepository.markCompleted(id, uri.toString())
 
                 notificationManager.cancel(id)
                 notificationManager.notify(
                     COMPLETION_NOTIFICATION_ID_BASE + id,
-                    buildApkCompletionNotification(id, target),
+                    buildApkCompletionNotification(
+                        id, target, expectedHash, expectedBytes,
+                        expectedVersionCode, expectedManagerUapi, expectedKsuMinimum,
+                    ),
                 )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                downloadRepository.markFailed(id, e.message ?: "Unknown error")
+                // Failed manager APKs must never remain masquerading as usable files.
+                target.delete()
+                downloadRepository.markFailed(id, e.message ?: "Unverified APK")
 
                 notificationManager.cancel(id)
                 notificationManager.notify(
@@ -354,11 +384,15 @@ class DownloadService : Service() {
         }
     }
 
-    private fun downloadUrlToTarget(id: Int, url: String, target: File) {
+    private fun downloadUrlToTarget(id: Int, url: String, target: File, expectedBytes: Long? = null) {
         httpClient.newCall(Request.Builder().url(url).build()).execute().use { response ->
             if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
             val body = response.body ?: throw IOException("Empty body")
             val total = body.contentLength()
+            if (expectedBytes != null && (expectedBytes <= 100_000L ||
+                (total >= 0L && total != expectedBytes))) {
+                throw IOException("Manager APK content length differs from release evidence")
+            }
 
             body.byteStream().use { source ->
                 FileOutputStream(target).use { output ->
@@ -369,6 +403,9 @@ class DownloadService : Service() {
                         if (read == -1) break
                         output.write(buffer, 0, read)
                         copied += read
+                        if (expectedBytes != null && copied > expectedBytes) {
+                            throw IOException("Manager APK exceeds attested byte count")
+                        }
                         if (total > 0L) {
                             reportProgress(
                                 id,
@@ -378,6 +415,9 @@ class DownloadService : Service() {
                         }
                     }
                     output.flush()
+                    if (expectedBytes != null && copied != expectedBytes) {
+                        throw IOException("Truncated manager APK")
+                    }
                 }
             }
         }
@@ -489,15 +529,22 @@ class DownloadService : Service() {
     private fun buildApkCompletionNotification(
         id: Int,
         target: File,
+        expectedHash: String,
+        expectedBytes: Long,
+        expectedVersionCode: Int,
+        expectedManagerUapi: Int,
+        expectedKsuMinimum: Int,
     ): android.app.Notification {
-        val installUri = FileProvider.getUriForFile(
-            this,
-            "${BuildConfig.APPLICATION_ID}.fileprovider",
-            target,
-        )
-        val installIntent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(installUri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // Never send an APK directly to the package installer from a stale
+        // notification: an internal activity performs final source and kernel checks.
+        val installIntent = Intent(this, ManagerInstallGuardActivity::class.java).apply {
+            putExtra(EXTRA_FILE_PATH, target.absolutePath)
+            putExtra(EXTRA_EXPECTED_SHA256, expectedHash)
+            putExtra(EXTRA_EXPECTED_SIZE, expectedBytes)
+            putExtra(EXTRA_MANAGER_EXPECTED_VERSION_CODE, expectedVersionCode)
+            putExtra(EXTRA_MANAGER_UAPI, expectedManagerUapi)
+            putExtra(EXTRA_MANAGER_KSU_MIN, expectedKsuMinimum)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         val installPendingIntent = PendingIntent.getActivity(
             this,

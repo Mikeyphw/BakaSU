@@ -38,6 +38,6 @@ Example values are placeholders, **not** validated compatibility requirements. F
 
 - The fork currently has no signed stable/beta releases. Existing in-app update channels therefore yield no eligible published fork APK.
 - This is an F03 manager-side source and UI gate; actual candidate metadata and signed release automation come in F04–F07.
-- Stable releases currently retain their ordinary update behavior, but the source is locked to the fork. A stable compatibility gate can be enabled when release attestations exist.
+- Stable and beta release channels now both require candidate-specific compatibility metadata. Unknown or incompatible candidates are shown as blocked; neither channel bypasses the final kernel-state check.
 - No APK signing, publication, installation, kernel modifications, root/device changes, or local Gradle.
 - GitHub Actions must pass compilation, lint, source contracts and build gates before merging/deploying.
