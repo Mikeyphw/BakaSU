@@ -7,8 +7,10 @@ import kotlinx.coroutines.withContext
 import org.bakasu.bakasu.BuildConfig
 import org.bakasu.bakasu.data.network.NetworkRequestRepository
 import org.bakasu.bakasu.domain.model.ManagerApkSource
+import org.bakasu.bakasu.domain.model.ManagerCompatibilityRequirements
 import org.bakasu.bakasu.domain.model.ManagerUpdateChannel
 import org.bakasu.bakasu.domain.model.ManagerUpdateInfo
+import org.json.JSONArray
 import org.json.JSONObject
 
 class ManagerUpdateRepository(
@@ -17,7 +19,7 @@ class ManagerUpdateRepository(
     private companion object {
         const val UPDATE_CALL_TIMEOUT_SECONDS = 8L
         const val TAG = "ManagerUpdateRepository"
-        const val REPOSITORY = "Baka-SU/BakaSU"
+        const val REPOSITORY = "Mikeyphw/BakaSU"
         const val WORKFLOW_FILE = "build-manager.yml"
         const val BRANCH = "main"
         const val RELEASE_ARTIFACT = "Manager-release"
@@ -38,6 +40,11 @@ class ManagerUpdateRepository(
         val supportedAbis = Build.SUPPORTED_ABIS.toList()
         val release = requestJson("https://api.github.com/repos/$REPOSITORY/releases/latest")
             ?: return@withContext null
+        if (!release.optString("tag_name").startsWith("f07-v") || release.optBoolean("draft") ||
+            release.optBoolean("prerelease")
+        ) {
+            return@withContext null
+        }
         val changelog = release.optString("body")
         val assets = release.optJSONArray("assets") ?: return@withContext null
         val candidates = mutableListOf<ManagerApkCandidate>()
@@ -46,7 +53,7 @@ class ManagerUpdateRepository(
             val asset = assets.optJSONObject(index) ?: continue
             val parsed = parseApkName(asset.optString("name")) ?: continue
             val downloadUrl = asset.optString("browser_download_url")
-            if (downloadUrl.isBlank()) continue
+            if (!downloadUrl.startsWith("https://github.com/$REPOSITORY/releases/download/")) continue
 
             candidates += ManagerApkCandidate(
                 versionName = parsed.versionName,
@@ -54,45 +61,87 @@ class ManagerUpdateRepository(
                 abi = parsed.abi,
                 fileName = parsed.fileName,
                 source = ManagerApkSource.DirectApk(downloadUrl),
+                expectedSha256 = releaseSha256(asset),
+                expectedSizeBytes = asset.optLong("size", -1L),
             )
         }
 
-        return@withContext selectCandidate(candidates, supportedAbis)
-            ?.toUpdateInfo(ManagerUpdateChannel.STABLE, changelog)
+        val candidate = selectCandidate(candidates, supportedAbis) ?: return@withContext null
+        val requirements = resolvePublishedCompatibility(assets, candidate)
+        return@withContext candidate.toUpdateInfo(ManagerUpdateChannel.STABLE, changelog)
+            .copy(compatibilityRequirements = requirements)
     }
 
+    // Only published APKs from this fork are candidates. An upstream workflow
+    // artifact is NEVER a fork update. Missing compatibility metadata is
+    // rendered as UNKNOWN by the Home screen and cannot be installed as beta.
     suspend fun checkBetaUpdate(): ManagerUpdateInfo? = withContext(Dispatchers.IO) {
         val supportedAbis = Build.SUPPORTED_ABIS.toList()
-        val currentVersionCode = BuildConfig.VERSION_CODE
-        val workflowRuns = requestJson(
-            "https://api.github.com/repos/$REPOSITORY/actions/workflows/$WORKFLOW_FILE/runs" +
-                "?branch=$BRANCH&status=success&per_page=1&event=push",
-        )?.optJSONArray("workflow_runs") ?: return@withContext null
-        val run = workflowRuns.optJSONObject(0) ?: return@withContext null
-        val runId = run.optLong("id", -1L)
-        val headSha = run.optString("head_sha")
-        if (runId <= 0L || headSha.isBlank()) return@withContext null
+        val releases = requestJsonArray("https://api.github.com/repos/$REPOSITORY/releases?per_page=20")
+            ?: return@withContext null
+        for (releaseIndex in 0 until releases.length()) {
+            val release = releases.optJSONObject(releaseIndex) ?: continue
+            if (!release.optBoolean("prerelease") || release.optBoolean("draft") ||
+                !release.optString("tag_name").startsWith("f07-v")
+            ) {
+                continue
+            }
+            val assets = release.optJSONArray("assets") ?: continue
+            val candidates = mutableListOf<ManagerApkCandidate>()
+            for (index in 0 until assets.length()) {
+                val asset = assets.optJSONObject(index) ?: continue
+                val parsed = parseApkName(asset.optString("name")) ?: continue
+                val url = asset.optString("browser_download_url")
+                if (!url.startsWith("https://github.com/$REPOSITORY/releases/download/")) continue
+                candidates += ManagerApkCandidate(
+                    versionName = parsed.versionName,
+                    versionCode = parsed.versionCode,
+                    abi = parsed.abi,
+                    fileName = parsed.fileName,
+                    source = ManagerApkSource.DirectApk(url),
+                    expectedSha256 = releaseSha256(asset),
+                    expectedSizeBytes = asset.optLong("size", -1L),
+                )
+            }
+            val candidate = selectCandidate(candidates, supportedAbis) ?: continue
+            val requirements = resolvePublishedCompatibility(assets, candidate)
+            return@withContext candidate.toUpdateInfo(
+                ManagerUpdateChannel.BETA,
+                release.optString("body"),
+            ).copy(compatibilityRequirements = requirements)
+        }
+        null
+    }
 
-        val commitCount = requestCommitCount(headSha) ?: return@withContext null
-        val versionCode = CI_MANAGER_VERSION_CODE_OFFSET + commitCount
-        if (versionCode <= currentVersionCode) return@withContext null
-
-        val preferredAbi = supportedAbis.firstOrNull() ?: UNIVERSAL_ABI
-        return@withContext ManagerUpdateInfo(
-            channel = ManagerUpdateChannel.BETA,
-            versionCode = versionCode,
-            versionName = headSha.take(SHORT_SHA_LENGTH),
-            abi = preferredAbi,
-            fileName = "BakaSU_${headSha.take(SHORT_SHA_LENGTH)}_" +
-                "$versionCode-$preferredAbi-release.apk",
-            source = ManagerApkSource.NightlyArtifact(
-                url = "https://nightly.link/$REPOSITORY/actions/runs/$runId/$RELEASE_ARTIFACT.zip",
-                preferredAbi = preferredAbi,
-                expectedVersionCode = versionCode,
-            ),
-            changelog = run.optJSONObject("head_commit")?.optString("message").orEmpty(),
+    private suspend fun resolvePublishedCompatibility(
+        assets: JSONArray,
+        candidate: ManagerApkCandidate,
+    ): ManagerCompatibilityRequirements? {
+        val manifestAsset = (0 until assets.length())
+            .mapNotNull { assets.optJSONObject(it) }
+            .singleOrNull { it.optString("name") == "manager-compatibility.json" }
+            ?: return null
+        val url = manifestAsset.optString("browser_download_url")
+        if (!url.startsWith("https://github.com/$REPOSITORY/releases/download/")) return null
+        val manifest = requestJson(url) ?: return null
+        return parseManagerCompatibilityManifest(
+            manifest,
+            candidate.fileName,
+            candidate.versionCode,
+            candidate.abi,
         )
     }
+
+    private suspend fun requestJsonArray(url: String): JSONArray? = networkRequestRepository
+        .fetch(
+            url = url,
+            headers = GITHUB_HEADERS,
+            forceNetwork = true,
+            callTimeoutSeconds = UPDATE_CALL_TIMEOUT_SECONDS,
+        )
+        .onFailure { Log.w(TAG, "Fork releases request failed", it) }
+        .mapCatching { JSONArray(it) }
+        .getOrNull()
 
     fun findNightlyApkEntry(
         entries: List<ZipEntryMetadata>,
@@ -151,6 +200,10 @@ class ManagerUpdateRepository(
         )
     }
 
+    private fun releaseSha256(asset: JSONObject): String? = asset.optString("digest")
+        .takeIf { it.matches(Regex("sha256:[a-f0-9]{64}")) }
+        ?.removePrefix("sha256:")
+
     private fun selectCandidate(
         candidates: List<ManagerApkCandidate>,
         supportedAbis: List<String>,
@@ -178,6 +231,8 @@ class ManagerUpdateRepository(
         val abi: String,
         val fileName: String,
         val source: ManagerApkSource,
+        val expectedSha256: String?,
+        val expectedSizeBytes: Long,
     ) {
         fun toUpdateInfo(
             channel: ManagerUpdateChannel,
@@ -190,6 +245,8 @@ class ManagerUpdateRepository(
             fileName = fileName,
             source = source,
             changelog = changelog,
+            expectedApkSha256 = expectedSha256,
+            expectedApkSizeBytes = expectedSizeBytes.takeIf { it > 100_000L },
         )
     }
 }

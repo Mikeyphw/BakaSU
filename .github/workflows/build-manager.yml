@@ -1,20 +1,10 @@
 name: Build Manager
 
+# Fork policy: the heavy inherited matrix must only run intentionally or when
+# called by the upstream-compatible tag release workflow. PRs are qualified by
+# fork-manager-ci.yml; automatic signed release builds arrive in F04-F07.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - '.github/workflows/build-manager.yml'
-      - '.github/workflows/build-lkm.yml'
-      - '.github/workflows/ddk-lkm.yml'
-      - '.github/workflows/ksud.yml'
-      - '.github/workflows/ksuinit.yml'
-      - '.github/riscv64-cargo.toml'
-      - 'manager/**'
-      - 'kernel/**'
-      - 'userspace/**'
-      - 'scripts/ksubot.py'
-  pull_request:
   workflow_call:
 
 jobs:

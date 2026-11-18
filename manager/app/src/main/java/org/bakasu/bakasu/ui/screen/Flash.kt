@@ -1,6 +1,7 @@
 package org.bakasu.bakasu.ui.screen
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Parcelable
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -70,6 +71,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.parcelize.Parcelize
 import org.bakasu.bakasu.R
+import org.bakasu.bakasu.data.file.ReinstallArchiveVerifier
+import org.bakasu.bakasu.data.module.ModuleRepository
 import org.bakasu.bakasu.domain.model.FlashOperation
 import org.bakasu.bakasu.domain.model.FlashOperationUpdate
 import org.bakasu.bakasu.domain.model.LkmSelection
@@ -106,6 +109,7 @@ fun FlashScreen(flashIt: FlashIt) {
     val isModuleUriAccessible = koinInject<IsModuleUriAccessibleUseCase>()
     val checkFlashModuleMount = koinInject<CheckFlashModuleMountUseCase>()
     val executeFlashOperation = koinInject<ExecuteFlashOperationUseCase>()
+    val reinstallModules = koinInject<ModuleRepository>()
     val context = LocalContext.current
 
     val isExternalInstall = remember {
@@ -241,47 +245,118 @@ fun FlashScreen(flashIt: FlashIt) {
                 logContent.append(text).append("\n")
             }
 
-            flashModuleUpdate(executeFlashOperation, flashIt.uri, onFinish = { showReboot, code ->
-                if (code != 0) {
-                    text += "$errorCodeString $code.\n$checkLogString\n"
+            val preparedReinstall = if (flashIt.reinstallModuleId != null) {
+                runCatching {
+                    check(reinstallModules.refreshInstalledModules(manual = true, checkUpdates = false).isSuccess) {
+                        "Unable to refresh installed module state"
+                    }
+                    val existing = reinstallModules.installedModules.value.modules.singleOrNull {
+                        it.id == flashIt.reinstallModuleId &&
+                            it.versionCode == flashIt.reinstallVersionCode &&
+                            it.enabled == flashIt.reinstallWasEnabled &&
+                            !it.remove && !it.update
+                    }
+                    check(existing != null) { "Installed module changed before reinstall" }
+                    ReinstallArchiveVerifier.prepare(
+                        context,
+                        Uri.parse(flashIt.uri),
+                        flashIt.reinstallModuleId,
+                        flashIt.reinstallSha256,
+                        flashIt.reinstallSize,
+                    )
+                }.getOrElse { error ->
+                    text += "Reinstall refused: ${error.message ?: "unsafe module ZIP"}\n"
                     flashViewModel.dispatch(FlashUiAction.SetStatus(FlashingStatus.FAILED))
-                } else {
-                    flashViewModel.dispatch(FlashUiAction.SetStatus(FlashingStatus.SUCCESS))
-
-                    viewModel.dispatch(ModuleUiAction.MarkNeedRefresh)
+                    hasUpdateCompleted = true
+                    return@withContext
                 }
-                if (showReboot) {
-                    text += "\n\n\n"
-                    showFloatAction = true
-
-                    // 如果是内部安装，显示重启按钮后不自动返回
-                    if (isExternalInstall) {
-                        return@flashModuleUpdate
+            } else {
+                null
+            }
+            var reinstallFlashSucceeded = false
+            try {
+                // A module can change while its downloaded ZIP is being copied.
+                // Re-read live root state before invoking the privileged flash API.
+                if (preparedReinstall != null) {
+                    val refreshed = reinstallModules.refreshInstalledModules(manual = true, checkUpdates = false)
+                    val matching = reinstallModules.installedModules.value.modules.singleOrNull {
+                        it.id == flashIt.reinstallModuleId &&
+                            it.versionCode == flashIt.reinstallVersionCode &&
+                            it.enabled == flashIt.reinstallWasEnabled && !it.remove && !it.update
+                    }
+                    if (refreshed.isFailure || matching == null) {
+                        text += "Reinstall refused: module state changed before flashing\n"
+                        flashViewModel.dispatch(FlashUiAction.SetStatus(FlashingStatus.FAILED))
+                        hasUpdateCompleted = true
+                        return@withContext
                     }
                 }
-                hasUpdateCompleted = true
+                flashModuleUpdate(
+                    executeFlashOperation,
+                    preparedReinstall?.let { Uri.fromFile(it).toString() } ?: flashIt.uri,
+                    onFinish = { showReboot, code ->
+                        reinstallFlashSucceeded = code == 0
+                        if (code != 0) {
+                            text += "$errorCodeString $code.\n$checkLogString\n"
+                            flashViewModel.dispatch(FlashUiAction.SetStatus(FlashingStatus.FAILED))
+                        } else {
+                            flashViewModel.dispatch(FlashUiAction.SetStatus(FlashingStatus.SUCCESS))
 
-                if (!hasMetaModule && code == 0) {
-                    // 如果没安装 MetaModule，且此模块需要挂载，并且当前模块安装成功，警告用户
-                    scope.launch {
-                        if (!checkFlashModuleMount(flashIt.uri)) return@launch
-                        shouldWarningUserMetaModule = true
+                            viewModel.dispatch(ModuleUiAction.MarkNeedRefresh)
+                        }
+                        if (showReboot) {
+                            text += "\n\n\n"
+                            showFloatAction = true
 
-                        alertDialog.show()
-                        shouldWarningUserMetaModule = false
+                            // 如果是内部安装，显示重启按钮后不自动返回
+                            if (isExternalInstall) {
+                                return@flashModuleUpdate
+                            }
+                        }
+                        hasUpdateCompleted = true
+
+                        if (!hasMetaModule && code == 0) {
+                            // 如果没安装 MetaModule，且此模块需要挂载，并且当前模块安装成功，警告用户
+                            scope.launch {
+                                if (!checkFlashModuleMount(flashIt.uri)) return@launch
+                                shouldWarningUserMetaModule = true
+
+                                alertDialog.show()
+                                shouldWarningUserMetaModule = false
+                            }
+                        }
+                    },
+                    onStdout = {
+                        tempText = "$it\n"
+                        if (tempText.startsWith("[H[J")) { // clear command
+                            text = tempText.substring(6)
+                        } else {
+                            text += tempText
+                        }
+                        logContent.append(it).append("\n")
+                    },
+                    onStderr = {
+                        logContent.append(it).append("\n")
+                    },
+                )
+                // Restoring the disabled state is best-effort, and any failure is
+                // surfaced explicitly rather than silently enabling a root module.
+                if (reinstallFlashSucceeded && flashIt.reinstallWasEnabled == false) {
+                    val refresh = reinstallModules.refreshInstalledModules(manual = true, checkUpdates = false)
+                    val actual = reinstallModules.installedModules.value.modules.singleOrNull {
+                        it.id == flashIt.reinstallModuleId
+                    }
+                    if (refresh.isFailure || actual == null ||
+                        (actual.enabled && reinstallModules.setModuleEnabled(actual.dirId, false).isFailure)
+                    ) {
+                        text += "Reinstall warning: could not preserve disabled module state\n"
+                        flashViewModel.dispatch(FlashUiAction.SetStatus(FlashingStatus.FAILED))
                     }
                 }
-            }, onStdout = {
-                tempText = "$it\n"
-                if (tempText.startsWith("[H[J")) { // clear command
-                    text = tempText.substring(6)
-                } else {
-                    text += tempText
-                }
-                logContent.append(it).append("\n")
-            }, onStderr = {
-                logContent.append(it).append("\n")
-            })
+            } finally {
+                // The verified copy is private to this operation, never left in Downloads.
+                preparedReinstall?.delete()
+            }
         }
     }
 
@@ -749,7 +824,14 @@ sealed class FlashIt : Parcelable {
 
     data class FlashModule(val uri: String) : FlashIt()
     data class FlashModules(val uris: List<String>, val currentIndex: Int = 0) : FlashIt()
-    data class FlashModuleUpdate(val uri: String) : FlashIt() // 模块更新
+    data class FlashModuleUpdate(
+        val uri: String,
+        val reinstallModuleId: String? = null,
+        val reinstallVersionCode: Int? = null,
+        val reinstallWasEnabled: Boolean? = null,
+        val reinstallSha256: String? = null,
+        val reinstallSize: Long? = null,
+    ) : FlashIt() // module update or independently checked reinstall
     data object FlashRestore : FlashIt()
     data object FlashUninstall : FlashIt()
 }

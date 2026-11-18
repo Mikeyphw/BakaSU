@@ -467,8 +467,21 @@ fun ModulePage(bottomPadding: Dp) {
                     uiState = uiState,
                     listState = listState,
                     modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-                    onUpdateModule = {
-                        navigator.push(Route.Flash.moduleUpdate(it.toString()))
+                    onUpdateModule = { uri, reinstallModule, expectedSha256, expectedSize ->
+                        navigator.push(
+                            if (reinstallModule == null) {
+                                Route.Flash.moduleUpdate(uri.toString())
+                            } else {
+                                Route.Flash.moduleReinstall(
+                                    uri.toString(),
+                                    reinstallModule.id,
+                                    reinstallModule.versionCode,
+                                    reinstallModule.enabled,
+                                    expectedSha256,
+                                    expectedSize,
+                                )
+                            },
+                        )
                     },
                     onClickModule = { id, hasWebUi ->
                         val currentTime = System.currentTimeMillis()
@@ -596,7 +609,7 @@ private fun ModuleList(
     listState: LazyListState,
     modifier: Modifier = Modifier,
     boxModifier: Modifier = Modifier,
-    onUpdateModule: (Uri) -> Unit,
+    onUpdateModule: (Uri, InstalledModule?, String?, Long?) -> Unit,
     onClickModule: (id: String, hasWebUi: Boolean) -> Unit,
     context: Context,
     snackBarHost: SnackbarHostState,
@@ -783,6 +796,7 @@ private fun ModuleList(
         changelogUrl: String,
         downloadUrl: String,
         fileName: String,
+        reinstall: Boolean = false,
     ) {
         val showToast: suspend (String) -> Unit = { msg ->
             withContext(Dispatchers.Main) {
@@ -794,36 +808,66 @@ private fun ModuleList(
             }
         }
 
-        val verification = loadingDialog.withLoading { viewModel.resolveUpdate(module) }
+        val verification = loadingDialog.withLoading {
+            if (reinstall) viewModel.resolveReinstall(module) else viewModel.resolveUpdate(module)
+        }
         if (verification == ModuleUpdateVerification.Rejected) {
             showToast(context.getString(R.string.repo_update_unverifiable))
             return
         }
         val registry = verification as? ModuleUpdateVerification.Registry
-        val canInstall = { registry == null || viewModel.isUpdateCurrent(module, registry) }
-        val changelogResult = if (registry != null) {
-            Result.success(
-                ModuleReadme(
-                    registry.release.descriptionHTML.ifBlank { module.description },
-                    registry.repositoryUrl,
-                    if (registry.release.descriptionHTML.isNotBlank()) DocumentFormat.HTML else DocumentFormat.MARKDOWN,
-                    DocumentPolicy.SameOrigin(registry.repositoryUrl),
-                ),
+        val canInstall = {
+            if (reinstall) {
+                viewModel.isReinstallCurrent(module, registry)
+            } else {
+                registry == null || viewModel.isUpdateCurrent(module, registry)
+            }
+        }
+        val confirmResult = if (reinstall) {
+            val warning = if (registry == null) {
+                context.getString(R.string.module_reinstall_unverified)
+            } else {
+                context.getString(R.string.module_reinstall_verified)
+            }
+            val latestFallback = module.moduleReinstall?.versionCode != module.versionCode
+            val label = context.getString(
+                if (latestFallback) R.string.module_reinstall_latest else R.string.module_reinstall,
+            )
+            confirmDialog.awaitConfirm(
+                label,
+                content = context.getString(
+                    R.string.module_reinstall_confirm,
+                    module.name,
+                    module.moduleReinstall?.version ?: module.version,
+                ) + "\n\n" +
+                    (if (latestFallback) context.getString(R.string.module_reinstall_latest_explanation) + "\n\n" else "") +
+                    warning,
+                confirm = label,
             )
         } else {
-            loadingDialog.withLoading { viewModel.loadUpdateChangelog(changelogUrl, module.updateJson) }
+            val changelogResult = if (registry != null) {
+                Result.success(
+                    ModuleReadme(
+                        registry.release.descriptionHTML.ifBlank { module.description },
+                        registry.repositoryUrl,
+                        if (registry.release.descriptionHTML.isNotBlank()) DocumentFormat.HTML else DocumentFormat.MARKDOWN,
+                        DocumentPolicy.SameOrigin(registry.repositoryUrl),
+                    ),
+                )
+            } else {
+                loadingDialog.withLoading { viewModel.loadUpdateChangelog(changelogUrl, module.updateJson) }
+            }
+            val changelog = changelogResult.getOrElse {
+                showToast(context.getString(R.string.repo_document_error))
+                return
+            }
+            confirmDialog.awaitConfirm(
+                changelogText,
+                content = changelog.content,
+                document = changelog,
+                confirm = updateText,
+            )
         }
-        val changelog = changelogResult.getOrElse {
-            showToast(context.getString(R.string.repo_document_error))
-            return
-        }
-
-        val confirmResult = confirmDialog.awaitConfirm(
-            changelogText,
-            content = changelog.content,
-            document = changelog,
-            confirm = updateText,
-        )
 
         if (confirmResult != ConfirmResult.Confirmed) {
             return
@@ -848,7 +892,14 @@ private fun ModuleList(
                 canEnqueue = canInstall,
                 onFailed = { failed -> Toast.makeText(context, downloadFailureMessage(context, failed), Toast.LENGTH_LONG).show() },
                 onDownloaded = { uri ->
-                    if (canInstall()) onUpdateModule(uri)
+                    if (canInstall()) {
+                        onUpdateModule(
+                            uri,
+                            module.takeIf { reinstall },
+                            registry?.expected?.sha256,
+                            registry?.expected?.size,
+                        )
+                    }
                 },
                 onDownloading = {
                     launch(Dispatchers.Main) {
@@ -972,6 +1023,7 @@ private fun ModuleList(
                     module = module,
                     moduleSizes = uiState.moduleSizes,
                     updateUrl = module.moduleUpdate?.zipUrl.orEmpty(),
+                    reinstallUrl = module.moduleReinstall?.zipUrl.orEmpty(),
                     onUninstallClicked = {
                         scope.launch {
                             withContext(Dispatchers.IO) {
@@ -991,6 +1043,20 @@ private fun ModuleList(
                                     module.moduleUpdate!!.changelog,
                                     module.moduleUpdate.zipUrl,
                                     "${module.name}-${module.moduleUpdate.version}.zip",
+                                )
+                            }
+                        }
+                    },
+                    onReinstall = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                val candidate = module.moduleReinstall ?: return@withContext
+                                onModuleUpdate(
+                                    module,
+                                    candidate.changelog,
+                                    candidate.zipUrl,
+                                    "${module.id}-${module.versionCode}-reinstall.zip",
+                                    reinstall = true,
                                 )
                             }
                         }
@@ -1217,9 +1283,11 @@ fun ModuleItem(
     module: InstalledModule,
     moduleSizes: Map<String, String>,
     updateUrl: String,
+    reinstallUrl: String,
     onUninstallClicked: (InstalledModule) -> Unit,
     onCheckChanged: suspend (Boolean) -> Boolean,
     onUpdate: (InstalledModule) -> Unit,
+    onReinstall: (InstalledModule) -> Unit,
     onClick: (InstalledModule) -> Unit,
     onModuleAddShortcut: (InstalledModule, ShortcutType) -> Unit,
     showMoreModuleInfo: Boolean,
@@ -1544,6 +1612,32 @@ fun ModuleItem(
                     }
                 }
 
+                if (reinstallUrl.isNotEmpty() && !module.remove && !module.update) {
+                    Surface(
+                        modifier = Modifier
+                            .padding(vertical = 5.dp)
+                            .defaultMinSize(minWidth = 52.dp, minHeight = 32.dp)
+                            .clip(ButtonDefaults.filledTonalShape)
+                            .clickable { onReinstall(module) },
+                        color = ButtonDefaults.filledTonalButtonColors().containerColor,
+                        contentColor = ButtonDefaults.filledTonalButtonColors().contentColor,
+                    ) {
+                        Icon(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .padding(12.dp, 7.dp, 12.dp, 7.dp),
+                            imageVector = Icons.TwoTone.Refresh,
+                            contentDescription = stringResource(
+                                if (module.moduleReinstall?.versionCode != module.versionCode) {
+                                    R.string.module_reinstall_latest
+                                } else {
+                                    R.string.module_reinstall
+                                },
+                            ),
+                        )
+                    }
+                }
+
                 Surface(
                     modifier = Modifier
                         .padding(vertical = 5.dp)
@@ -1615,8 +1709,10 @@ private fun ModuleItemPreview() {
         module,
         emptyMap(),
         "",
+        "",
         {},
         { true },
+        {},
         {},
         {},
         { _, _ -> },

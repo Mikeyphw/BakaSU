@@ -91,9 +91,12 @@ import org.bakasu.bakasu.Natives.KernelPatchImplementation
 import org.bakasu.bakasu.R
 import org.bakasu.bakasu.domain.model.HomeSystemInfo
 import org.bakasu.bakasu.domain.model.KernelStatus
+import org.bakasu.bakasu.domain.model.ManagerCompatibilityVerdict
 import org.bakasu.bakasu.domain.model.ManagerUpdateChannel
 import org.bakasu.bakasu.domain.model.ManagerUpdateInfo
+import org.bakasu.bakasu.domain.model.evaluateManagerCompatibility
 import org.bakasu.bakasu.domain.usecase.EnqueueManagerUpdateUseCase
+import org.bakasu.bakasu.domain.usecase.GetKernelStatusUseCase
 import org.bakasu.bakasu.magica.MagicaService
 import org.bakasu.bakasu.ui.component.KsuIsValid
 import org.bakasu.bakasu.ui.component.SwipeableSnackbarHost
@@ -348,8 +351,8 @@ fun HomePage(
                 )
             }
             Spacer(modifier = Modifier.height(10.dp))
-            ManagerUpdateCard(uiState.stableManagerUpdate)
-            ManagerUpdateCard(uiState.betaManagerUpdate)
+            ManagerUpdateCard(uiState.stableManagerUpdate, uiState.systemStatus)
+            ManagerUpdateCard(uiState.betaManagerUpdate, uiState.systemStatus)
             if (uiState.isBetaManagerUpdateCheckFailed) {
                 WarningCard(
                     message = stringResource(R.string.beta_update_check_failed),
@@ -385,7 +388,7 @@ fun HomePage(
 }
 
 @Composable
-private fun ManagerUpdateCard(update: ManagerUpdateInfo?) {
+private fun ManagerUpdateCard(update: ManagerUpdateInfo?, kernelStatus: KernelStatus) {
     val visibilityState = remember { MutableTransitionState(false) }
     var displayedUpdate by remember { mutableStateOf<ManagerUpdateInfo?>(null) }
 
@@ -400,16 +403,53 @@ private fun ManagerUpdateCard(update: ManagerUpdateInfo?) {
         exit = fadeOut() + shrinkVertically(),
     ) {
         displayedUpdate?.let { updateInfo ->
-            ManagerUpdateCardContent(updateInfo)
+            ManagerUpdateCardContent(updateInfo, kernelStatus)
         }
     }
 }
 
 @Composable
-private fun ManagerUpdateCardContent(updateInfo: ManagerUpdateInfo) {
+private fun ManagerUpdateCardContent(updateInfo: ManagerUpdateInfo, kernelStatus: KernelStatus) {
+    // A stable build is no safer than a beta when candidate metadata is absent.
+    val compatibility = if (updateInfo.expectedApkSha256 == null ||
+        updateInfo.expectedApkSizeBytes == null
+    ) {
+        ManagerCompatibilityVerdict.UNKNOWN
+    } else {
+        evaluateManagerCompatibility(
+            updateInfo.compatibilityRequirements,
+            kernelStatus.isManager,
+            kernelStatus.isRootAvailable,
+            kernelStatus.kernelUAPIVersion,
+            kernelStatus.ksuVersion,
+        )
+    }
+    if (compatibility != ManagerCompatibilityVerdict.COMPATIBLE) {
+        WarningCard(
+            message = stringResource(
+                if (compatibility == ManagerCompatibilityVerdict.INCOMPATIBLE) {
+                    R.string.manager_beta_incompatible
+                } else {
+                    R.string.manager_beta_unverified
+                },
+                updateInfo.versionName,
+            ),
+            icon = {
+                Icon(
+                    imageVector = Icons.TwoTone.Warning,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+            },
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        return
+    }
     val context = LocalContext.current
     val permissionRequestInterface = LocalPermissionRequestInterface.current
     val enqueueManagerUpdate = koinInject<EnqueueManagerUpdateUseCase>()
+    val getKernelStatus = koinInject<GetKernelStatusUseCase>()
+    val scope = rememberCoroutineScope()
     val channelTitle = stringResource(
         if (updateInfo.channel == ManagerUpdateChannel.STABLE) {
             R.string.manager_update_stable
@@ -436,12 +476,33 @@ private fun ManagerUpdateCardContent(updateInfo: ManagerUpdateInfo) {
     }
     val updateDialog = rememberConfirmDialog(
         onConfirm = {
-            downloadManagerUpdate(
-                context,
-                permissionRequestInterface,
-                updateInfo,
-                enqueueManagerUpdate,
-            )
+            // Recheck immediately before download for BOTH release channels.
+            scope.launch {
+                val freshStatus = runCatching { getKernelStatus() }.getOrNull()
+                val currentVerdict = freshStatus?.let { status ->
+                    evaluateManagerCompatibility(
+                        updateInfo.compatibilityRequirements,
+                        status.isManager,
+                        status.isRootAvailable,
+                        status.kernelUAPIVersion,
+                        status.ksuVersion,
+                    )
+                }
+                if (currentVerdict == ManagerCompatibilityVerdict.COMPATIBLE) {
+                    downloadManagerUpdate(
+                        context,
+                        permissionRequestInterface,
+                        updateInfo,
+                        enqueueManagerUpdate,
+                    )
+                } else {
+                    Toast.makeText(
+                        context,
+                        R.string.manager_beta_changed,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
         },
     )
 

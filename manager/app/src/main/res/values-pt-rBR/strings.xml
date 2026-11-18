@@ -58,6 +58,12 @@
     <string name="profile_selinux_domain">Domínio</string>
     <string name="profile_selinux_rules">Regras</string>
     <string name="module_update">Atualizar</string>
+    <string name="module_reinstall">Reinstalar</string>
+    <string name="module_reinstall_latest">Instalar ZIP mais recente</string>
+    <string name="module_reinstall_latest_explanation">O ZIP da versão instalada não está disponível na URL de atualização. Este ZIP é de outra versão, mais recente, e não corresponde a uma reinstalação exata. Confira a versão antes de continuar.</string>
+    <string name="module_reinstall_confirm">Reinstalar %1$s (versão %2$s) usando o ZIP de atualização publicado? O módulo será gravado novamente e poderá ser necessário reiniciar.</string>
+    <string name="module_reinstall_verified">O ZIP será validado com os metadados de lançamento e SHA-256 do repositório antes da instalação.</string>
+    <string name="module_reinstall_unverified">Este ZIP foi fornecido pelo autor, sem verificação SHA-256 pelo repositório. Prossiga somente se confiar na origem.</string>
     <string name="module_downloading">Baixando módulo %s</string>
     <string name="module_start_downloading">Começando a baixar %s</string>
     <string name="new_version_available">Nova versão %s está disponível, clique para atualizar.</string>
@@ -513,6 +519,9 @@
     <string name="beta_update_check_failed">A verificação da atualização beta falhou. Deslize para baixo para atualizar e tente novamente.</string>
     <string name="manager_update_stable">Atualização estável</string>
     <string name="manager_update_beta">Atualização Beta</string>
+    <string name="manager_beta_unverified">Beta %1$s não recomendada: esta compilação não possui metadados de compatibilidade verificados. Instalação bloqueada.</string>
+    <string name="manager_beta_incompatible">Beta %1$s incompatível com este kernel KernelSU. Instalação bloqueada.</string>
+    <string name="manager_beta_changed">Não foi possível verificar novamente a compatibilidade do kernel. Download beta bloqueado.</string>
     <string name="manager_update_details">Versão: %1$s (%2$d)\nArquitetura: %3$s</string>
     <string name="settings_check_beta_update">Confira as atualizações beta</string>
     <string name="settings_check_beta_update_summary">Verificação automática de versões beta a partir da ramificação principal</string>

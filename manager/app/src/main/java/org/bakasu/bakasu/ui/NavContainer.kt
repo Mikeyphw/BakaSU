@@ -718,7 +718,14 @@ private fun Route.Flash.toFlashIt(): FlashIt = when (flashType) {
 
     Route.Flash.TYPE_MODULES -> FlashIt.FlashModules(uris, currentIndex)
 
-    Route.Flash.TYPE_MODULE_UPDATE -> FlashIt.FlashModuleUpdate(uris.firstOrNull().orEmpty())
+    Route.Flash.TYPE_MODULE_UPDATE -> FlashIt.FlashModuleUpdate(
+        uris.firstOrNull().orEmpty(),
+        reinstallModuleId,
+        reinstallVersionCode,
+        reinstallWasEnabled,
+        reinstallSha256,
+        reinstallSize,
+    )
 
     Route.Flash.TYPE_RESTORE -> FlashIt.FlashRestore
 

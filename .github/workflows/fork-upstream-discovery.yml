@@ -1,0 +1,60 @@
+name: Fork Upstream Discovery (F04)
+
+# Scheduled workflows only run from the default branch after the PR is merged.
+# F05 dispatches source-pinned diagnostics; no merges to main, signing or releases.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: bakasu-fork-upstream-discovery
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate discovery contracts
+        run: python3 -B -m unittest discover -s scripts/fork/tests -p 'test_f04_*.py' -v
+      - name: Discover source-pinned upstream events
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 -B scripts/fork/upstream_events.py \
+            --lookback-days 7 \
+            --output fork-upstream-candidates.json
+      - name: Upload read-only discovery report
+        uses: actions/upload-artifact@v7
+        with:
+          name: fork-upstream-candidates-${{ github.run_id }}
+          path: fork-upstream-candidates.json
+          retention-days: 30
+          if-no-files-found: error
+      - name: Validate F05 dispatch contracts
+        run: python3 -B -m unittest discover -s scripts/fork/tests -p 'test_f05_*.py' -v
+      - name: Dispatch source-pinned F05 diagnostic manager builds
+        if: github.ref == 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORK_SHA: ${{ github.sha }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          python3 -B scripts/fork/f05_dispatch.py \
+            --report fork-upstream-candidates.json \
+            --output fork-upstream-dispatch.json
+      - name: Upload F05 dispatch ledger (including refusal diagnostics)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fork-upstream-dispatch-${{ github.run_id }}
+          path: fork-upstream-dispatch.json
+          retention-days: 30
+          if-no-files-found: ignore

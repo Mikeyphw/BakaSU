@@ -21,6 +21,7 @@ data class InstalledModule(
     val webUiIconPath: String?,
     val dirId: String,
     val moduleUpdate: ModuleUpdateMetadata?,
+    val moduleReinstall: ModuleUpdateMetadata? = null,
 )
 
 data class InstalledModulesState(

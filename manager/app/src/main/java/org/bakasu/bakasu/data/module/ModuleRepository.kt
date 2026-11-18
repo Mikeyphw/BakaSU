@@ -40,11 +40,6 @@ class ModuleRepository(
             mutableInstalledModules.update { it.copy(refreshing = true) }
             runCatching {
                 val previous = mutableInstalledModules.value.modules
-                val previousVersionKeys = if (manual) {
-                    emptySet()
-                } else {
-                    previous.mapTo(mutableSetOf()) { it.id + it.versionCode }
-                }
                 val modules = parseModules(ksuCliRepository.listModules())
                 val requiresMount = coroutineScope {
                     modules.map { module ->
@@ -69,18 +64,25 @@ class ModuleRepository(
                     val withUpdates = coroutineScope {
                         modules.map { module ->
                             async(Dispatchers.IO) {
-                                val shouldCheck =
-                                    module.id + module.versionCode !in previousVersionKeys ||
-                                        module.updateJson.isEmpty() ||
-                                        module.remove || module.update || !module.enabled
+                                // Fetch one candidate per module, not twice for update + reinstall.
+                                // Preserve prior resolved metadata on a non-manual refresh.
+                                val cached = previous.firstOrNull {
+                                    it.id == module.id && it.versionCode == module.versionCode &&
+                                        it.updateJson == module.updateJson
+                                }
+                                val shouldCheck = manual || cached == null ||
+                                    module.remove || module.update || !module.enabled
+                                val candidate = if (shouldCheck) {
+                                    fetchUpdateMetadata(module.updateJson).getOrNull()
+                                } else {
+                                    cached?.moduleUpdate ?: cached?.moduleReinstall
+                                }
                                 module.copy(
-                                    moduleUpdate = if (shouldCheck) {
-                                        checkUpdate(
-                                            module.updateJson,
-                                            module.versionCode,
-                                        ).getOrNull()
-                                    } else {
-                                        null
+                                    moduleUpdate = candidate?.takeIf { it.versionCode > module.versionCode },
+                                    moduleReinstall = candidate?.takeIf {
+                                        !module.remove && !module.update &&
+                                            it.versionCode >= module.versionCode &&
+                                            isSecureReinstallZipUrl(it.zipUrl)
                                     },
                                 )
                             }
@@ -135,16 +137,19 @@ class ModuleRepository(
         }
     }
 
-    suspend fun checkUpdate(
-        url: String,
-        currentVersionCode: Int,
-    ): Result<ModuleUpdateMetadata?> {
+    // Retains the original Update behavior; exact-version candidates are only used
+    // by the separate, user-confirmed Reinstall action.
+    suspend fun checkUpdate(url: String, currentVersionCode: Int): Result<ModuleUpdateMetadata?> = fetchUpdateMetadata(url).map { metadata ->
+        metadata?.takeIf { it.versionCode > currentVersionCode }
+    }
+
+    private suspend fun fetchUpdateMetadata(url: String): Result<ModuleUpdateMetadata?> {
         if (url.isBlank()) return Result.success(null)
         return networkRequestRepository.fetch(url).mapCatching { body ->
             val json = JSONObject(body)
-            val onlineVersionCode = json.optInt("versionCode")
-            val zipUrl = json.optString("zipUrl")
-            if (onlineVersionCode <= currentVersionCode || zipUrl.isBlank()) {
+            val onlineVersionCode = json.optInt("versionCode", -1)
+            val zipUrl = json.optString("zipUrl").trim()
+            if (onlineVersionCode < 0 || zipUrl.isBlank()) {
                 null
             } else {
                 ModuleUpdateMetadata(
@@ -159,6 +164,12 @@ class ModuleRepository(
             }
         }
     }
+
+    private fun isSecureReinstallZipUrl(url: String): Boolean = runCatching {
+        val uri = java.net.URI(url)
+        uri.scheme.equals("https", ignoreCase = true) &&
+            !uri.host.isNullOrBlank() && uri.userInfo == null
+    }.getOrDefault(false)
 
     private fun parseModules(raw: String): List<InstalledModule> {
         val array = JSONArray(raw)

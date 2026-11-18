@@ -1,0 +1,100 @@
+name: Fork Source-Pinned Manager Build (F05)
+
+# Invoked only from the default branch by F05 dispatcher; manual use requires
+# fully qualified event provenance. No writes, release signing or publishing.
+run-name: F05/${{ inputs.channel }}/${{ inputs.upstream_sha }}/${{ inputs.fork_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Source channel
+        type: choice
+        options: [beta, stable]
+        required: true
+      upstream_sha:
+        description: Exact upstream 40-hex source commit
+        type: string
+        required: true
+      upstream_event_id:
+        description: Upstream Actions run ID (beta) or release ID (stable)
+        type: string
+        required: true
+      fork_sha:
+        description: Exact fork main commit at discovery time
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: f05-${{ inputs.channel }}-${{ inputs.upstream_sha }}-${{ inputs.fork_sha }}
+  cancel-in-progress: false
+
+jobs:
+  source-pinned-debug-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact default-branch fork source
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run F05 regression gates before source integration
+        run: |
+          python3 -B -m unittest discover -s scripts/fork/tests -p 'test_*.py' -v
+          python3 -B scripts/fork/source_contract.py --check
+      - name: Verify upstream event and integrate exact SHA without overwriting fork
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          F05_CHANNEL: ${{ inputs.channel }}
+          F05_UPSTREAM_SHA: ${{ inputs.upstream_sha }}
+          F05_EVENT_ID: ${{ inputs.upstream_event_id }}
+          F05_FORK_SHA: ${{ inputs.fork_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -B scripts/fork/f05_source_build.py stage \
+            --channel "$F05_CHANNEL" \
+            --upstream-sha "$F05_UPSTREAM_SHA" \
+            --event-id "$F05_EVENT_ID" \
+            --fork-sha "$F05_FORK_SHA" \
+            --report "$GITHUB_WORKSPACE/f05-source-provenance.json"
+      - name: Revalidate all fork contracts after upstream integration
+        run: |
+          python3 -B scripts/fork/source_contract.py --check
+          python3 -B -m unittest discover -s scripts/fork/tests -p 'test_*.py' -v
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Setup Gradle (hosted CI only)
+        uses: gradle/actions/setup-gradle@v6
+      - name: Check formatting and compile diagnostic manager APK
+        working-directory: manager
+        run: ./gradlew spotlessCheck :app:assembleDebug --no-daemon --no-configuration-cache --stacktrace
+      - name: Record SHA-256 of built debug APKs
+        run: |
+          python3 -B scripts/fork/f05_source_build.py finalize \
+            --report "$GITHUB_WORKSPACE/f05-source-provenance.json" \
+            --apk-dir "$GITHUB_WORKSPACE/manager/app/build/outputs/apk/debug"
+      - name: Upload source provenance, even on conflict or failure
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: f05-source-provenance-${{ github.run_id }}
+          path: f05-source-provenance.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload debug APK (never a release)
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: f05-diagnostic-manager-${{ inputs.channel }}-${{ github.run_id }}
+          path: manager/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
