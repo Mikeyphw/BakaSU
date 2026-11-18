@@ -34,5 +34,36 @@ class ContractTests(unittest.TestCase):
             self.assertTrue(any("MISSING_CONTRACT" in p for p in contract.check_tree(root)))
 
 
+    def test_secure_reinstall_contract_replaces_legacy_callback(self):
+        path = "manager/app/src/main/java/org/bakasu/bakasu/ui/screen/main/ModulePage.kt"
+        expected = contract.REQUIRED[path]
+        self.assertNotIn("onUpdateModule(uri)", expected)
+        for token in ("onUpdateModule(", "module.takeIf { reinstall }",
+                      "Route.Flash.moduleReinstall(", "registry?.expected?.sha256",
+                      "registry?.expected?.size"):
+            self.assertIn(token, expected)
+        flash = contract.REQUIRED[
+            "manager/app/src/main/java/org/bakasu/bakasu/ui/screen/Flash.kt"
+        ]
+        self.assertIn("ReinstallArchiveVerifier.prepare(", flash)
+        self.assertIn("reinstallModuleId", flash)
+        self.assertIn("reinstallWasEnabled", flash)
+
+    def test_unverified_flash_seam_is_not_accepted(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for relative, tokens in contract.REQUIRED.items():
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("\n".join(tokens), encoding="utf-8")
+            self.assertEqual(contract.check_tree(root), [])
+            flash_path = root / "manager/app/src/main/java/org/bakasu/bakasu/ui/screen/Flash.kt"
+            flash_path.write_text("generic unverified flash callback", encoding="utf-8")
+            self.assertTrue(any(
+                item.startswith("MISSING_CONTRACT ") and "Flash.kt" in item
+                for item in contract.check_tree(root)
+            ))
+
+
 if __name__ == "__main__":
     unittest.main()

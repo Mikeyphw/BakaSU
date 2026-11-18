@@ -34,14 +34,14 @@ import org.bakasu.bakasu.data.module.registry.DownloadVerifier
 import org.bakasu.bakasu.data.module.registry.RegistryDownloadStore
 import org.bakasu.bakasu.data.module.registry.RegistryUrls
 import org.bakasu.bakasu.data.settings.SettingsPlatformRepository
-import org.bakasu.bakasu.data.update.ManagerUpdateRepository
 import org.bakasu.bakasu.data.update.ManagerApkIntegrity
-import org.bakasu.bakasu.ui.ManagerInstallGuardActivity
+import org.bakasu.bakasu.data.update.ManagerUpdateRepository
 import org.bakasu.bakasu.data.update.ZipRangeArchive
 import org.bakasu.bakasu.domain.model.DownloadStatus
 import org.bakasu.bakasu.domain.model.DownloadVerificationFailure
 import org.bakasu.bakasu.domain.model.ExpectedFile
 import org.bakasu.bakasu.ui.MainActivity
+import org.bakasu.bakasu.ui.ManagerInstallGuardActivity
 import org.koin.android.ext.android.inject
 
 class DownloadService : Service() {
@@ -148,7 +148,8 @@ class DownloadService : Service() {
                     expectedVersionCode <= 0 ||
                     expectedHash == null || !expectedHash.matches(Regex("[a-f0-9]{64}")) ||
                     expectedBytes <= 100_000L || expectedBytes > 1_073_741_824L ||
-                    expectedManagerUapi <= 0 || expectedKsuMinimum <= 0) {
+                    expectedManagerUapi <= 0 || expectedKsuMinimum <= 0
+                ) {
                     downloadRepository.markFailed(downloadId, "Unverified manager release metadata")
                     return START_NOT_STICKY
                 }
@@ -346,8 +347,13 @@ class DownloadService : Service() {
                 notificationManager.notify(
                     COMPLETION_NOTIFICATION_ID_BASE + id,
                     buildApkCompletionNotification(
-                        id, target, expectedHash, expectedBytes,
-                        expectedVersionCode, expectedManagerUapi, expectedKsuMinimum,
+                        id,
+                        target,
+                        expectedHash,
+                        expectedBytes,
+                        expectedVersionCode,
+                        expectedManagerUapi,
+                        expectedKsuMinimum,
                     ),
                 )
             } catch (e: CancellationException) {
@@ -389,8 +395,11 @@ class DownloadService : Service() {
             if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
             val body = response.body ?: throw IOException("Empty body")
             val total = body.contentLength()
-            if (expectedBytes != null && (expectedBytes <= 100_000L ||
-                (total >= 0L && total != expectedBytes))) {
+            if (expectedBytes != null && (
+                    expectedBytes <= 100_000L ||
+                        (total >= 0L && total != expectedBytes)
+                    )
+            ) {
                 throw IOException("Manager APK content length differs from release evidence")
             }
 

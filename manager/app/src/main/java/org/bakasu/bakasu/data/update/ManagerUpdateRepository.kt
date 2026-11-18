@@ -41,7 +41,10 @@ class ManagerUpdateRepository(
         val release = requestJson("https://api.github.com/repos/$REPOSITORY/releases/latest")
             ?: return@withContext null
         if (!release.optString("tag_name").startsWith("f07-v") || release.optBoolean("draft") ||
-            release.optBoolean("prerelease")) return@withContext null
+            release.optBoolean("prerelease")
+        ) {
+            return@withContext null
+        }
         val changelog = release.optString("body")
         val assets = release.optJSONArray("assets") ?: return@withContext null
         val candidates = mutableListOf<ManagerApkCandidate>()
@@ -79,7 +82,10 @@ class ManagerUpdateRepository(
         for (releaseIndex in 0 until releases.length()) {
             val release = releases.optJSONObject(releaseIndex) ?: continue
             if (!release.optBoolean("prerelease") || release.optBoolean("draft") ||
-                !release.optString("tag_name").startsWith("f07-v")) continue
+                !release.optString("tag_name").startsWith("f07-v")
+            ) {
+                continue
+            }
             val assets = release.optJSONArray("assets") ?: continue
             val candidates = mutableListOf<ManagerApkCandidate>()
             for (index in 0 until assets.length()) {

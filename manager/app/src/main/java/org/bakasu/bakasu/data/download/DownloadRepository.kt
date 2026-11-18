@@ -78,7 +78,8 @@ class DownloadRepository(
             if (proof == null || !proof.matches(Regex("[a-f0-9]{64}")) ||
                 length == null || length <= 100_000L || length > 1_073_741_824L ||
                 compat == null || compat.managerUapi <= 0 || compat.minimumKernelSuVersion <= 0 ||
-                update.source !is ManagerApkSource.DirectApk) {
+                update.source !is ManagerApkSource.DirectApk
+            ) {
                 markFailed(id, "Unsigned or incomplete fork release evidence")
                 return id
             }

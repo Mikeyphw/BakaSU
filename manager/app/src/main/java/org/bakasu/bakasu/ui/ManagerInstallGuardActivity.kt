@@ -45,10 +45,15 @@ class ManagerInstallGuardActivity : ComponentActivity() {
                 }
                 val requirements = ManagerCompatibilityRequirements(managerUapi, minKsu)
                 val status = kernels.getStatus()
-                check(evaluateManagerCompatibility(
-                    requirements, status.isManager, status.isRootAvailable,
-                    status.kernelUAPIVersion, status.ksuVersion,
-                ) == ManagerCompatibilityVerdict.COMPATIBLE) {
+                check(
+                    evaluateManagerCompatibility(
+                        requirements,
+                        status.isManager,
+                        status.isRootAvailable,
+                        status.kernelUAPIVersion,
+                        status.ksuVersion,
+                    ) == ManagerCompatibilityVerdict.COMPATIBLE,
+                ) {
                     "Kernel or manager authorization changed"
                 }
                 // Keep the signed, verified APK outside mutable public Downloads
@@ -60,7 +65,10 @@ class ManagerInstallGuardActivity : ComponentActivity() {
                     cacheDir.listFiles()?.forEach { old ->
                         if (old.name.startsWith("fork-install-") && old.name.endsWith(".apk") &&
                             old.isFile && !java.nio.file.Files.isSymbolicLink(old.toPath()) &&
-                            old.lastModified() < expiry) old.delete()
+                            old.lastModified() < expiry
+                        ) {
+                            old.delete()
+                        }
                     }
                     val dest = File.createTempFile("fork-install-", ".apk", cacheDir)
                     try {
@@ -77,10 +85,12 @@ class ManagerInstallGuardActivity : ComponentActivity() {
                     "${BuildConfig.APPLICATION_ID}.fileprovider",
                     privateFile,
                 )
-                startActivity(Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, "application/vnd.android.package-archive")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                })
+                startActivity(
+                    Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, "application/vnd.android.package-archive")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    },
+                )
             }
             result.onFailure { failure ->
                 Toast.makeText(

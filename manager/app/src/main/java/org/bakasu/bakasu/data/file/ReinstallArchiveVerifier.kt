@@ -60,14 +60,18 @@ object ReinstallArchiveVerifier {
                     require(names.size < 10000) { "ZIP contains too many entries" }
                     val entry = entries.nextElement()
                     val name = entry.name
-                    require(entry.size >= 0L && entry.size <= MAX_ZIP_BYTES &&
-                        totalUncompressed <= MAX_ZIP_BYTES * 4 - entry.size) {
+                    require(
+                        entry.size >= 0L && entry.size <= MAX_ZIP_BYTES &&
+                            totalUncompressed <= MAX_ZIP_BYTES * 4 - entry.size,
+                    ) {
                         "ZIP decompressed size exceeds safe bound"
                     }
                     val components = name.replace('\\', '/').split('/')
-                    require(name.isNotBlank() && !name.startsWith('/') && !name.contains('\\') &&
-                        components.none { it == ".." || it == "." } && !entry.isUnixSymlink &&
-                        names.add(name)) {
+                    require(
+                        name.isNotBlank() && !name.startsWith('/') && !name.contains('\\') &&
+                            components.none { it == ".." || it == "." } && !entry.isUnixSymlink &&
+                            names.add(name),
+                    ) {
                         "Unsafe ZIP entry"
                     }
                     // Trust neither declared uncompressed size nor ZIP compression ratio.
@@ -78,8 +82,10 @@ object ReinstallArchiveVerifier {
                                 val n = content.read(buffer)
                                 if (n < 0) break
                                 actualEntryBytes += n
-                                require(actualEntryBytes <= MAX_ZIP_BYTES &&
-                                    totalUncompressed <= MAX_ZIP_BYTES * 4 - n) {
+                                require(
+                                    actualEntryBytes <= MAX_ZIP_BYTES &&
+                                        totalUncompressed <= MAX_ZIP_BYTES * 4 - n,
+                                ) {
                                     "ZIP actual extracted data exceeds safe bound"
                                 }
                                 totalUncompressed += n

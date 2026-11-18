@@ -19,8 +19,10 @@ object ManagerApkIntegrity {
         expectedBytes: Long,
         expectedVersionCode: Int,
     ) {
-        require(sha256Regex.matches(expectedSha256) && expectedBytes > 100_000L &&
-            expectedVersionCode > 0) { "Incomplete signed release metadata" }
+        require(
+            sha256Regex.matches(expectedSha256) && expectedBytes > 100_000L &&
+                expectedVersionCode > 0,
+        ) { "Incomplete signed release metadata" }
         require(!apk.isSymbolicLink() && apk.isFile && apk.length() == expectedBytes) {
             "APK size or file safety mismatch"
         }
@@ -43,13 +45,17 @@ object ManagerApkIntegrity {
             PackageManager.GET_SIGNATURES
         }
         val pm = context.packageManager
+
         @Suppress("DEPRECATION")
         val candidate = pm.getPackageArchiveInfo(apk.absolutePath, flag)
             ?: throw SecurityException("APK package metadata unavailable")
+
         @Suppress("DEPRECATION")
         val installed = pm.getPackageInfo(BuildConfig.APPLICATION_ID, flag)
-        require(candidate.packageName == BuildConfig.APPLICATION_ID &&
-            candidate.versionCodeLong() == expectedVersionCode.toLong()) {
+        require(
+            candidate.packageName == BuildConfig.APPLICATION_ID &&
+                candidate.versionCodeLong() == expectedVersionCode.toLong(),
+        ) {
             "APK package identity or version mismatch"
         }
         require(expectedVersionCode.toLong() > installed.versionCodeLong()) {
@@ -57,8 +63,10 @@ object ManagerApkIntegrity {
         }
         val candidateCerts = candidate.certificatesSha256()
         val installedCerts = installed.certificatesSha256()
-        require(candidateCerts.size == 1 && installedCerts.size == 1 &&
-            candidateCerts.single() == installedCerts.single()) {
+        require(
+            candidateCerts.size == 1 && installedCerts.size == 1 &&
+                candidateCerts.single() == installedCerts.single(),
+        ) {
             "APK signer does not match the installed fork"
         }
     }
@@ -68,15 +76,19 @@ object ManagerApkIntegrity {
     }.getOrDefault(true)
 
     @Suppress("DEPRECATION")
-    private fun android.content.pm.PackageInfo.versionCodeLong(): Long =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) longVersionCode
-        else versionCode.toLong()
+    private fun android.content.pm.PackageInfo.versionCodeLong(): Long = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        longVersionCode
+    } else {
+        versionCode.toLong()
+    }
 
     @Suppress("DEPRECATION")
     private fun android.content.pm.PackageInfo.certificatesSha256(): List<String> {
         val certs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             signingInfo?.apkContentsSigners?.toList().orEmpty()
-        } else signatures?.toList().orEmpty()
+        } else {
+            signatures?.toList().orEmpty()
+        }
         return certs.map { signature ->
             MessageDigest.getInstance("SHA-256").digest(signature.toByteArray())
                 .joinToString("") { "%02x".format(it.toInt() and 255) }

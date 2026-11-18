@@ -412,7 +412,8 @@ private fun ManagerUpdateCard(update: ManagerUpdateInfo?, kernelStatus: KernelSt
 private fun ManagerUpdateCardContent(updateInfo: ManagerUpdateInfo, kernelStatus: KernelStatus) {
     // A stable build is no safer than a beta when candidate metadata is absent.
     val compatibility = if (updateInfo.expectedApkSha256 == null ||
-        updateInfo.expectedApkSizeBytes == null) {
+        updateInfo.expectedApkSizeBytes == null
+    ) {
         ManagerCompatibilityVerdict.UNKNOWN
     } else {
         evaluateManagerCompatibility(

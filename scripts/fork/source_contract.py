@@ -15,7 +15,16 @@ REQUIRED = {
         "suspend fun onModuleUpdate(",
         "fun ModuleItem(",
         "module.updateJson",
-        "onUpdateModule(uri)",
+        "onUpdateModule(",
+        "module.takeIf { reinstall }",
+        "Route.Flash.moduleReinstall(",
+        "registry?.expected?.sha256",
+        "registry?.expected?.size",
+    ),
+    "manager/app/src/main/java/org/bakasu/bakasu/ui/screen/Flash.kt": (
+        "ReinstallArchiveVerifier.prepare(",
+        "reinstallModuleId",
+        "reinstallWasEnabled",
     ),
     "manager/app/src/main/java/org/bakasu/bakasu/ui/viewmodel/ModuleViewModel.kt": (
         "suspend fun resolveUpdate(",
@@ -35,6 +44,10 @@ REQUIRED = {
     "manager/app/src/main/java/org/bakasu/bakasu/data/kernel/KernelRepository.kt": (
         "kernelUAPIVersion",
         "managerUAPIVersion",
+    ),
+    ".devtool.toml": (
+        "[project]",
+        "runner = \"python\"",
     ),
     "manager/app/build.gradle.kts": (
         "applicationId = managerPackageName",

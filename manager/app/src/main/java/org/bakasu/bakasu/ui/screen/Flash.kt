@@ -2,8 +2,6 @@ package org.bakasu.bakasu.ui.screen
 
 import android.content.Intent
 import android.net.Uri
-import org.bakasu.bakasu.data.file.ReinstallArchiveVerifier
-import org.bakasu.bakasu.data.module.ModuleRepository
 import android.os.Parcelable
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -73,6 +71,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.parcelize.Parcelize
 import org.bakasu.bakasu.R
+import org.bakasu.bakasu.data.file.ReinstallArchiveVerifier
+import org.bakasu.bakasu.data.module.ModuleRepository
 import org.bakasu.bakasu.domain.model.FlashOperation
 import org.bakasu.bakasu.domain.model.FlashOperationUpdate
 import org.bakasu.bakasu.domain.model.LkmSelection
@@ -325,7 +325,8 @@ fun FlashScreen(flashIt: FlashIt) {
                                 shouldWarningUserMetaModule = false
                             }
                         }
-                    }, onStdout = {
+                    },
+                    onStdout = {
                         tempText = "$it\n"
                         if (tempText.startsWith("[H[J")) { // clear command
                             text = tempText.substring(6)
@@ -333,9 +334,11 @@ fun FlashScreen(flashIt: FlashIt) {
                             text += tempText
                         }
                         logContent.append(it).append("\n")
-                    }, onStderr = {
+                    },
+                    onStderr = {
                         logContent.append(it).append("\n")
-                    })
+                    },
+                )
                 // Restoring the disabled state is best-effort, and any failure is
                 // surfaced explicitly rather than silently enabling a root module.
                 if (reinstallFlashSucceeded && flashIt.reinstallWasEnabled == false) {
@@ -344,7 +347,8 @@ fun FlashScreen(flashIt: FlashIt) {
                         it.id == flashIt.reinstallModuleId
                     }
                     if (refresh.isFailure || actual == null ||
-                        (actual.enabled && reinstallModules.setModuleEnabled(actual.dirId, false).isFailure)) {
+                        (actual.enabled && reinstallModules.setModuleEnabled(actual.dirId, false).isFailure)
+                    ) {
                         text += "Reinstall warning: could not preserve disabled module state\n"
                         flashViewModel.dispatch(FlashUiAction.SetStatus(FlashingStatus.FAILED))
                     }
