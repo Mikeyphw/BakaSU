@@ -29,3 +29,10 @@ retained proof alone is not a substitute for independently fetched provider
 identity. No automatic bypass is implemented. F09 must test the actual signed
 manager on a physical device separately. No reviewed release is currently
 configured or claimed accepted.
+
+GAP-05 binds the report to `F08/<tag>` and artifact name
+`fork-f08-published-release-audit-<run-id>-<attempt>`. The schema-2 report
+records the actual release and asset IDs as well as their SHA-256/size
+inventory. See [F09 device evidence](FORK_F09_DEVICE_ACCEPTANCE.md) and
+[F10 retention and replay](FORK_F10_FINAL_AUDIT.md) for read-only follow-up.
+Legacy schema-1 evidence cannot stand in for the exact schema-2 audit.

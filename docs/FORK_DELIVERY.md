@@ -33,3 +33,9 @@ registration reconciliation, and pending independent gates. F02–F08 contain
 subsequent implementations; source presence does not establish full acceptance.
 The source contracts enforce the current verified reinstall and flash-time module
 identity route. No signing, physical-device, or release acceptance is inferred.
+
+GAP-05 adds [F09 physical-device evidence collection](FORK_F09_DEVICE_ACCEPTANCE.md)
+and [F10 final R9 reconciliation and release replay](FORK_F10_FINAL_AUDIT.md).
+These do not install anything or authorize a root manager; actual protected
+signing, approved publication, live F08 verification and independent physical
+acceptance are required before claiming closure.

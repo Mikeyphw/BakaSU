@@ -1,4 +1,5 @@
 name: Fork F08 — Read-Only Published Manager Qualification
+run-name: F08/${{ inputs.tag }}
 
 # No push/tag/PR/release triggers. This is post-publication verification, not
 # promotion, signing, installation or device authorization.
@@ -66,7 +67,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: fork-f08-published-release-audit-${{ github.run_id }}
+          name: fork-f08-published-release-audit-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/f08/qualification.json
           if-no-files-found: error
           retention-days: 30
