@@ -251,6 +251,32 @@ def check_release(tag: str, release: dict, registry: dict, provenance: dict,
             'rootDaemonAuthorized': False, 'releaseBuildPerformed': False}
 
 
+def bind_audit_identity(report, release, env):
+    """Bind the independently verified output to a concrete hosted attempt.
+
+    Only main() calls this after the original provider archive readback. Keep
+    check_release() usable as the offline verifier without claiming live CI.
+    """
+    run, attempt = env.get('GITHUB_RUN_ID', ''), env.get('GITHUB_RUN_ATTEMPT', '')
+    require(isinstance(run, str) and isinstance(attempt, str) and
+            re.fullmatch(r'[1-9][0-9]{0,18}', run) and re.fullmatch(r'[1-9][0-9]{0,18}', attempt) and
+            lineage.positive(int(run)) and lineage.positive(int(attempt)) and
+            env.get('GITHUB_EVENT_NAME') == 'workflow_dispatch', 'F08_AUDIT_ATTEMPT_INVALID')
+    require(report.get('originalProviderArchiveDigestsVerified') is True and
+            lineage.positive(release.get('id')), 'F08_LIVE_RELEASE_IDENTITY_MISSING')
+    assets = {}
+    ids = set()
+    for row in release['assets']:
+        require(lineage.positive(row.get('id')) and row['id'] not in ids and
+                row['name'] not in assets, 'F08_PROVIDER_ASSET_IDENTITY_INVALID')
+        ids.add(row['id'])
+        assets[row['name']] = {'id': row['id'], 'size': row['size'], 'digest': row['digest']}
+    require(assets and len(assets) == report['githubAssetDigestsChecked'], 'F08_PROVIDER_ASSET_INVENTORY_DRIFT')
+    report.update(schemaVersion=2, f08RunId=int(run), f08RunAttempt=int(attempt),
+                  publishedReleaseId=release['id'], githubAssets=assets)
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--tag', required=True)
@@ -291,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
                     all(hash_file(original_apks/x['fileName'])==x['sha256'] for x in report['apks']),
                     'F08_ORIGINAL_SIGNED_APK_ARCHIVE_DRIFT')
             report['originalProviderArchiveDigestsVerified']=True
+            bind_audit_identity(report, release, os.environ)
         # Output is non-authorizing evidence. Exclusive creation prevents
         # a stale/foreign audit from being overwritten and misattributed.
         import stat
