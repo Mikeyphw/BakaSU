@@ -14,7 +14,7 @@ Target: `Mikeyphw/BakaSU`, branch `feature/f01-fork-manager-baseline-20261115`.
 
 ## Important boundaries
 
-F04 is **discovery-only**. It **does not** yet dispatch builds, maintain an across-run processed-event ledger, merge upstream code, sign APKs, publish releases, or modify the app. Repeated scheduled runs can therefore report the same candidate. Source-qualified build dispatch, persistent event deduplication, and safe upstream integration belong to F05–F07.
+The scheduled F04 workflow remains **discovery-only**. Repeated scheduled reports may contain the same candidate. The separate owner-side GAP-03 journal persists processed-event identities and bounded replay checkpoints; no transient CI artifact is treated as its durable store. No hosted dispatch authority is added.
 
 Do not install any F01–F04 debug APK as the daily manager. Real-device authorization and persistent release signing are still pending. The F01–F03 module Reinstall and kernel compatibility patches stay in the PR.
 
@@ -29,4 +29,4 @@ python3 -B -m unittest discover -s scripts/fork/tests -p 'test_*.py' -v
 python3 -B scripts/fork/source_contract.py --check
 ```
 
-Run the F04 overlay's `inspect` first; it validates the exact fork branch, source SHA and clean worktree, with no Git mutations. `apply` commits and pushes the new detector/test/workflow and a path-trigger adjustment to `fork-manager-ci.yml` via your configured Git SSH. No local Gradle compilation or root/device operations.
+Use source-qualified native Devtool delivery for changes to the discovery workflow. No local Gradle compilation or root/device operations.

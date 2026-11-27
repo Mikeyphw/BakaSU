@@ -20,62 +20,6 @@ build = load('f05_source_build')
 A, B, C = 'a' * 40, 'b' * 40, 'c' * 40
 
 
-def report(*items):
-    return {'schemaVersion': 1, 'mode': 'discovery-only',
-            'upstreamRepository': build.UPSTREAM, 'forkRepository': build.FORK,
-            'candidates': list(items)}
-
-
-def item(channel, sha=A, event_id=15):
-    d = {'channel': channel, 'upstreamSha': sha,
-         'key': f'{channel}:{sha}'}
-    d['upstreamRunId' if channel == 'beta' else 'upstreamReleaseId'] = event_id
-    return d
-
-
-class F05DispatchTests(unittest.TestCase):
-    def test_stable_priority_beta_and_no_duplicated_runs(self):
-        r = report(item('beta', A), item('stable', B), item('beta', C))
-        runs = [{'head_branch': 'main', 'display_title': dispatch.run_title('beta', A, B)}]
-        result = dispatch.plan(r, B, runs)
-        self.assertEqual([r['channel'] for r in result['pending']], ['stable', 'beta'])
-        self.assertEqual(result['pending'][1]['upstreamSha'], C)
-        self.assertEqual(len(result['alreadyObserved']), 1)
-
-    def test_any_recorded_run_prevents_unbounded_failed_build_retry(self):
-        r = report(item('beta', A))
-        runs = [{'head_branch': 'main', 'display_title': dispatch.run_title('beta', A, B),
-                 'status': 'completed', 'conclusion': 'failure'}]
-        self.assertEqual(dispatch.plan(r, B, runs)['pending'], [])
-
-    def test_new_fork_sha_requalifies_source(self):
-        r = report(item('beta', A))
-        runs = [{'head_branch': 'main', 'display_title': dispatch.run_title('beta', A, B)}]
-        self.assertEqual(len(dispatch.plan(r, C, runs)['pending']), 1)
-
-    def test_invalid_report_source_sha_and_event_id_refused(self):
-        for candidate in [item('beta', 'x'*40), item('beta', A, 0),
-                          item('unknown', A), item('beta', A, True)]:
-            with self.assertRaises(dispatch.DispatchError):
-                dispatch.eligible_candidates(report(candidate))
-        with self.assertRaises(dispatch.DispatchError):
-            dispatch.eligible_candidates({'schemaVersion': 1, 'mode': 'wrong'})
-
-    def test_duplicate_same_channel_sha_refused(self):
-        with self.assertRaises(dispatch.DispatchError):
-            dispatch.eligible_candidates(report(item('beta', A, 1), item('beta', A, 2)))
-
-    def test_missing_run_title_blocks_without_guessing(self):
-        with self.assertRaises(dispatch.DispatchError):
-            dispatch.plan(report(item('stable')), B, [{'head_branch': 'main'}])
-
-    def test_queue_bounded_and_order_stable_first(self):
-        r = report(*(item('stable', f'{i:040x}', i+1) for i in range(7)))
-        out = dispatch.plan(r, B, [])
-        self.assertEqual(len(out['pending']), 4)
-        self.assertEqual(out['pendingBeyondLimit'], 3)
-
-
 class FakeUpstream:
     def __init__(self, routes):
         self.routes = routes

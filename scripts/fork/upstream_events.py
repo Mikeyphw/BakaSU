@@ -94,7 +94,7 @@ def validate_page(value: Any, key: str) -> list[dict[str, Any]]:
     return value
 
 
-def paged(client: JsonClient, prefix: str, field: str, cutoff: datetime, date_key: str):
+def paged(client: JsonClient, prefix: str, field: str, cutoff: datetime, date_key: str, *, ordered=False):
     """Stop once an entire page predates cutoff; refuse ambiguous truncation."""
     for page_no in range(1, MAX_PAGES + 1):
         route = f'{prefix}{"&" if "?" in prefix else "?"}per_page={PAGE_SIZE}&page={page_no}'
@@ -104,7 +104,7 @@ def paged(client: JsonClient, prefix: str, field: str, cutoff: datetime, date_ke
             return
         dates = [parse_time(x.get(date_key)) for x in items]
         # A missing date makes the traversal ambiguous, never silently stop.
-        if dates and all(d is not None and d < cutoff for d in dates):
+        if ordered and dates and all(d is not None and d < cutoff for d in dates):
             return
     raise UpstreamDiscoveryError('UPSTREAM_PAGINATION_TRUNCATED')
 
@@ -125,26 +125,31 @@ def resolve_tag(client: JsonClient, tag: str) -> str:
     raise UpstreamDiscoveryError('UPSTREAM_TAG_REFERENCE_TOO_DEEP')
 
 
-def discover_beta(client: JsonClient, cutoff: datetime, now: datetime) -> tuple[list[dict[str, Any]], int]:
+def discover_beta(client: JsonClient, cutoff: datetime, now: datetime) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
     results: dict[str, dict[str, Any]] = {}
     seen = 0
-    prefix = '/actions/workflows/' + BETA_WORKFLOW + '/runs?branch=main&event=push'
+    unsettled = []
+    prefix = ('/actions/workflows/' + BETA_WORKFLOW + '/runs?branch=main&event=push&created='
+              + quote(cutoff.strftime('%Y-%m-%dT%H:%M:%SZ') + '..' + now.strftime('%Y-%m-%dT%H:%M:%SZ'), safe=''))
     for _, runs in paged(client, prefix, 'workflow_runs', cutoff, 'created_at'):
         for run in runs:
             seen += 1
             created = parse_time(run.get('created_at'))
             if created is None or created < cutoff or created > now:
                 continue
-            if (run.get('head_branch') != 'main' or run.get('event') != 'push'
-                    or run.get('conclusion') != 'success' or run.get('status') != 'completed'):
+            if run.get('head_branch') != 'main' or run.get('event') != 'push':
                 continue
             source_repo = run.get('head_repository')
-            if source_repo is not None and (not isinstance(source_repo, dict)
-                                            or source_repo.get('full_name') != UPSTREAM):
+            if not isinstance(source_repo, dict) or source_repo.get('full_name') != UPSTREAM:
                 continue
             sha = run.get('head_sha')
             run_id = run.get('id')
             if not valid_sha(sha) or type(run_id) is not int or run_id <= 0:
+                continue
+            if run.get('status') != 'completed':
+                unsettled.append({'upstreamRunId':run_id,'eventAt':created.isoformat()})
+                continue
+            if run.get('conclusion') != 'success':
                 continue
             item = {
                 'key': f'beta:{sha}', 'channel': 'beta', 'upstreamSha': sha,
@@ -154,7 +159,7 @@ def discover_beta(client: JsonClient, cutoff: datetime, now: datetime) -> tuple[
             old = results.get(item['key'])
             if old is None or (item['eventAt'], item['upstreamRunId']) > (old['eventAt'], old['upstreamRunId']):
                 results[item['key']] = item
-    return list(results.values()), seen
+    return list(results.values()), seen, unsettled
 
 
 def discover_stable(client: JsonClient, cutoff: datetime, now: datetime) -> tuple[list[dict[str, Any]], int]:
@@ -164,7 +169,7 @@ def discover_stable(client: JsonClient, cutoff: datetime, now: datetime) -> tupl
         for release in releases:
             seen += 1
             published = parse_time(release.get('published_at'))
-            if published is None or published < cutoff or published > now or release.get('draft') or release.get('prerelease'):
+            if published is None or published < cutoff or published > now or release.get('draft') is not False or release.get('prerelease') is not False:
                 continue
             tag = release.get('tag_name')
             release_id = release.get('id')
@@ -188,7 +193,14 @@ def build_report(client: JsonClient, now: datetime, lookback_days: int = DEFAULT
         raise ValueError('invalid UTC time or lookback window')
     now = now.astimezone(timezone.utc)
     cutoff = now - timedelta(days=lookback_days)
-    beta, beta_seen = discover_beta(client, cutoff, now)
+    return build_window_report(client, cutoff, now)
+
+
+def build_window_report(client: JsonClient, cutoff: datetime, now: datetime) -> dict[str, Any]:
+    if cutoff.tzinfo is None or now.tzinfo is None or not timedelta(0) <= now - cutoff <= timedelta(days=30):
+        raise ValueError('invalid explicit UTC replay window')
+    cutoff, now = cutoff.astimezone(timezone.utc), now.astimezone(timezone.utc)
+    beta, beta_seen, unsettled = discover_beta(client, cutoff, now)
     stable, stable_seen = discover_stable(client, cutoff, now)
     combined = sorted(beta + stable, key=lambda item: (item['eventAt'], item['key']))
     if len(combined) > MAX_CANDIDATES:
@@ -202,6 +214,7 @@ def build_report(client: JsonClient, now: datetime, lookback_days: int = DEFAULT
         'lookbackStart': cutoff.isoformat(),
         'betaRunsScanned': beta_seen,
         'releasesScanned': stable_seen,
+        'unsettledBeta': unsettled,
         'candidates': combined,
     }
 
