@@ -13,7 +13,7 @@ This source change separates the scheduled read-only discovery report from the s
 
 The F05 diagnostic job exports the real merged Git objects and provenance, including the tree, source identities and APK checksums. `plan-promotion` verifies an authenticated provider artifact's digest and run identity, imports its bundle in a disposable bare repository, and produces an exact review inventory. It does not apply source changes or authorize a PR. An independent native Devtool source-qualified overlay and reviewed merge are still required to promote that inventory. Changed main, unexpected file modes, unsafe paths, and inventories outside the supported limit refuse promotion rather than approximate the source tree.
 
-`reserve-version` requires the exact integrated tree in a committed ancestor of the current canonical main and a fresh published-release floor. One journal counter covers stable and beta. The reservation is never claimed to be a signed or published release. The restricted Gradle property is a build input for the fork package; signed-build consumption and release verification remain later acceptance work. Local Gradle is prohibited; the actual Android build is a hosted gate.
+`reserve-version` requires the exact integrated tree in a committed ancestor of the current canonical main and a fresh published-release floor. One journal counter covers stable and beta. The reservation is never claimed to be a signed or published release. The restricted Gradle property is a build input for the fork package; GAP-04 implements reviewed signed-build consumption and release verification; actual hosted acceptance remains pending. Local Gradle is prohibited; the actual Android build is a hosted gate.
 
 ## Qualification boundaries
 

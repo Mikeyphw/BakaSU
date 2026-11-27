@@ -12,6 +12,9 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT/'scripts'/'fork'))
 import f08_qualification as f08
+import f07_release as f07
+import release_lineage as lineage
+import gap04_fixtures as fixtures
 
 HEAD = 'a' * 40
 FORK = 'b' * 40
@@ -22,10 +25,12 @@ APK = 'BakaSU_v1.2.3_40005-arm64-v8a-release.apk'
 PACKAGE = 'com.mikeyphw.bakasu'
 
 
+ROW=fixtures.reservation(HEAD,'d'*40,FORK)
+POLICY=fixtures.policy(ROW,CERT)
+
+
 def reviewed():
-    return {'f06RunId':RUN, 'tag':TAG, 'channel':'beta', 'sourceMergedSha':HEAD,
-            'sourceForkSha':FORK, 'certificateSha256':CERT, 'managerUapi':3,
-            'minimumKernelSuVersion':40000, 'versionCode':40005}
+    return fixtures.review(ROW,FORK,CERT,RUN,tag=TAG)
 
 
 class Fixture:
@@ -36,7 +41,7 @@ class Fixture:
         self.apk_data = b'F08-synthetic-binary-not-a-real-APK' * 3700
         self.sha = hashlib.sha256(self.apk_data).hexdigest()
         (self.assets/APK).write_bytes(self.apk_data)
-        self.registry = {'schemaVersion':1,'repository':f08.REPO,'defaultBranch':'main',
+        self.registry = {'schemaVersion':2,'repository':f08.REPO,'defaultBranch':'main',
                          'approvedCandidates':[reviewed()]}
         self.provenance = {'schemaVersion':1,'repository':f08.REPO,'status':'release-candidate-reviewed',
                            'releasePublished':False,'tag':TAG,'channel':'beta','f06RunId':RUN,
@@ -44,23 +49,19 @@ class Fixture:
                            'apks':[{'name':APK,'sha256':self.sha,'sizeBytes':len(self.apk_data)}]}
         self.compat = {'schemaVersion':1,'apks':[{'fileName':APK,'versionCode':40005,
                     'abi':'arm64-v8a','managerUapi':3,'minimumKernelSuVersion':40000}]}
-        self.f06 = {'schemaVersion':1,'repository':f08.REPO,
-                    'mode':'F06-signed-artifact-not-a-release','status':'signed-verified',
-                    'releaseQualified':False,'deviceQualified':False,'compatibilityQualified':False,
-                    'certificateSha256':CERT,
-                    'source':{'mergedSha':HEAD,'forkSha':FORK,'channel':'beta',
-                              'mergedTreeSha':'d'*40,'upstreamSha':'e'*40,'upstreamEventId':19},
-                    'apks':[{'fileName':APK,'sha256':self.sha,'sizeBytes':len(self.apk_data),
-                             'signerCertificateSha256':CERT,'packageName':PACKAGE,
-                             'versionCode':40005,'versionName':'v1.2.3'}]}
-        self.run = {'id':RUN,'event':'workflow_dispatch','status':'completed','conclusion':'success',
-                    'head_branch':'main','head_sha':FORK,
-                    'head_repository':{'full_name':f08.REPO},'run_attempt':1,'path':f08.RUN_PATH}
+        self.f06 = fixtures.signed(ROW,FORK,CERT,RUN)
+        self.f06['apks']=[{'fileName':APK,'sha256':self.sha,'sizeBytes':len(self.apk_data),
+                          'signerCertificateSha256':CERT,'packageName':PACKAGE,
+                          'nativeAbis':['arm64-v8a'],'versionCode':40005,'versionName':'v1.2.3'}]
+        entry=fixtures.pin_signed(self.assets/'f06-signed-provenance.json',self.f06,self.registry['approvedCandidates'][0])
+        self.provenance.update({k:entry[k] for k in ('f06RunAttempt','sourceTree','reservationId','signedProvenanceSha256')})
+        self.provenance['reviewDigest']=lineage.digest(entry)
+        self.run=fixtures.run_info(entry)
         self.tag_ref = {'ref':'refs/tags/'+TAG, 'object':{'type':'commit','sha':HEAD}}
         self.release = {'tag_name':TAG,'draft':False,'prerelease':True,
                         'published_at':'2026-11-16T20:00:00Z',
                         'target_commitish':HEAD,'author':{'login':'operator'},
-                        'assets':[]}
+                        'assets':[],'body':f07.release_notes(entry)}
         self.sync()
         self.sdk = self.root/'sdk'/'build-tools'/'36.0.0'
         self.sdk.mkdir(parents=True)
@@ -79,12 +80,17 @@ class Fixture:
     def audit(self, *, checker=None, ancestor=None):
         row={'fileName':APK,'sha256':self.sha,'sizeBytes':len(self.apk_data),
              'versionCode':40005,'versionName':'v1.2.3','packageName':PACKAGE,
-             'signerCertificateSha256':CERT}
-        return f08.check_release(TAG,self.release,self.registry,self.provenance,self.run,
-                self.compat,self.f06,self.assets,head=HEAD,sdk=self.root/'sdk',
-                tag_ref=self.tag_ref,
-                ancestor=ancestor or (lambda merged,main: merged == HEAD and main == HEAD),
-                apk_checker=checker or (lambda *args: row))
+             'nativeAbis':['arm64-v8a'],'signerCertificateSha256':CERT}
+        with (mock.patch.object(lineage,'ancestor',return_value=True),
+              mock.patch.object(lineage,'committed_source'),
+              mock.patch.object(lineage,'signer_continuity'),
+              mock.patch.object(lineage,'policy_at',return_value=POLICY)):
+            return f08.check_release(TAG,self.release,self.registry,self.provenance,self.run,
+                    self.compat,self.f06,self.assets,head=HEAD,sdk=self.root/'sdk',
+                    tag_ref=self.tag_ref,
+                    ancestor=ancestor or (lambda merged,main: merged == HEAD and main == HEAD),
+                    apk_checker=checker or (lambda *args: row))
+
 
 
 class PublishedReleaseAuditTests(unittest.TestCase):
@@ -156,7 +162,7 @@ class PublishedReleaseAuditTests(unittest.TestCase):
                                 ('signerCertificateSha256','f'*64),('sha256','f'*64)]:
                 valid={'fileName':APK,'sha256':f.sha,'sizeBytes':len(f.apk_data),
                         'versionCode':40005,'versionName':'v1.2.3',
-                        'packageName':PACKAGE,'signerCertificateSha256':CERT}
+                        'packageName':PACKAGE,'nativeAbis':['arm64-v8a'],'signerCertificateSha256':CERT}
                 valid[field]=value
                 with self.subTest(field=field),self.assertRaises(f08.Refused):
                     f.audit(checker=lambda *a:valid)

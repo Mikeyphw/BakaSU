@@ -109,6 +109,7 @@ def main(argv=None):
     sub=p.add_subparsers(dest='command',required=True)
     init=sub.add_parser('initialize');init.add_argument('--checkpoint',required=True);init.add_argument('--version-floor',required=True,type=int);init.add_argument('--yes',action='store_true')
     sub.add_parser('discover');sub.add_parser('reconcile');sub.add_parser('status')
+    export=sub.add_parser('export-signing-reservation');export.add_argument('--event-key',required=True)
     tick=sub.add_parser('tick');tick.add_argument('--fork-sha',required=True);tick.add_argument('--yes',action='store_true')
     d=sub.add_parser('dispatch');d.add_argument('--fork-sha',required=True);d.add_argument('--yes',action='store_true')
     for command in ('plan-promotion','reserve-version'):
@@ -117,6 +118,9 @@ def main(argv=None):
     a=p.parse_args(argv)
     try:
         store=LocalJournal(a.journal)
+        if a.command=='export-signing-reservation':
+            from release_lineage import export_reservation
+            sys.stdout.buffer.write(journal.canonical(export_reservation(store.read(),a.event_key)));return 0
         if a.command in ('plan-promotion','reserve-version'):
             if a.command=='reserve-version':journal.require(a.yes,'EXPLICIT_RESERVATION_APPROVAL_REQUIRED')
             value=review(store,Client(os.environ.get('GITHUB_TOKEN','')),a.event_key,a.repo.resolve(),a.artifact,a.artifact_id,getattr(a,'promoted_commit',None))
@@ -133,7 +137,7 @@ def main(argv=None):
         elif a.command=='dispatch':
             journal.require(a.yes,'EXPLICIT_DISPATCH_APPROVAL_REQUIRED');dispatch_pending(store,Client(os.environ.get('GITHUB_TOKEN','')),a.fork_sha)
         sys.stdout.buffer.write(journal.canonical(store.read()));return 0
-    except (journal.JournalError,DispatchError,UpstreamDiscoveryError,OSError,KeyError,TypeError,subprocess.SubprocessError,zipfile.BadZipFile) as exc:
+    except (ValueError,DispatchError,UpstreamDiscoveryError,OSError,KeyError,TypeError,subprocess.SubprocessError,zipfile.BadZipFile) as exc:
         print('BK_GAP03_JOURNAL_REFUSED '+str(exc),file=sys.stderr);return 2
 
 if __name__=='__main__':sys.exit(main())

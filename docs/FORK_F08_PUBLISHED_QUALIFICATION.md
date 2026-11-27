@@ -1,61 +1,31 @@
-# F08 — Independent, read-only signed release audit
+# F08 — independent published release verification
 
-This is an additional qualification layer for `Mikeyphw/BakaSU`, **not** a
-replacement for the F06 signing gate, F07 controlled publisher, or F09 device
-acceptance. It never creates a tag, alters a release, signs an APK, installs
-anything, or authorizes the privileged manager with the root daemon.
+Manual-only on fork main, `contents: read` and `actions: read`. Never signs,
+publishes, installs, or authorizes a daemon. Run only after an explicitly
+approved real F07 release. Supply the exact reviewed `f07-v` tag.
 
-## Security authority and workflow
+The verifier downloads public release assets and actual tag/ref metadata,
+validates the committed append-only F07 registry, confirms source ancestry,
+exact promoted tree and historical F06 signer/reservation policy, and confirms
+the original successful manual F06 run and exact attempt. It downloads both
+original F06 ZIPs by reviewed immutable provider ID and verifies raw provider
+archive hashes before bounded safe extraction. The retained original signed
+report in the published release must match the independently reviewed raw bytes
+and original provider report. Every original signed APK hash must equal the
+published APK hash; the independently downloaded GitHub release assets must all
+have matching GitHub SHA-256 digests and sizes, with no extra/missing files.
 
-`.github/workflows/fork-f08-release-qualification.yml` is manual-only and
-requires the reviewed F07 tag of an **already published** release. It runs on
-fork `main` with only `contents: read` and `actions: read`, downloads solely
-that fork release, reads the GitHub release, the original F06 signed-evidence artifact and
-workflow-run metadata, and does not persist checkout credentials. It cannot run as an
-unreviewed pull-request job with release privileges.
+It then independently verifies every published APK using Android SDK tools:
+exact package, signer certificate, v2 signature, version and native ABI inventory,
+plus candidate-specific compatibility UAPI/minimum KernelSU manifest and exact
+reviewed release/tag identity. The result is hosted artifact qualification,
+**not** device acceptance or privileged root authorization. No keys are used.
 
-The independent verifier `scripts/fork/f08_qualification.py` requires:
-
-- an exact single committed review entry with source SHA, fixed signer certificate,
-  F06 run ID, channel, version code, manager UAPI and minimum KernelSU version;
-- a successful manual F06 run from the fork's own main with the exact workflow
-  path, source SHA, and run attempt, plus a publicly published F07 tag;
-- an F07 source merge commit that remains an ancestor of the audited fork main;
-- the actual fork Git tag ref must still point at that reviewed source commit, not
-  merely carry a matching `target_commitish` field in release metadata;
-- require GitHub-provided `sha256:` digests for every APK and JSON metadata
-  asset; absent, malformed or mismatched digests refuse release qualification;
-- exact GitHub asset inventory, byte lengths, separately attested APK SHA-256s
-  **cross-checked against the original F06 signed APK attestation**,
-  version code and compatible ABI, with no extra or duplicate APKs;
-- **real Android `apksigner` verification** of each APK's v2 signature,
-  certificate SHA-256 and fork package ID `com.mikeyphw.bakasu`, plus actual
-  APK package/version metadata from Android build tools;
-- the existing F03 `manager-compatibility.json` format with exact APK
-  filename/version/ABI matches and approved manager UAPI/minimum KernelSU data.
-
-Malformed, missing, conflicting, truncated, oversized or unreviewed evidence
-fails closed. F08 writes only a small diagnostic JSON audit receipt to the
-runner temporary directory, then retains that report as a GitHub Actions
-artifact for review. It does not upload private keys or APKs to a second
-location. **A passing F08 audit is hosted artifact verification, not device
-or privileged-daemon qualification.**
-
-## Operating sequence
-
-1. Review and merge F06/F07/F08 to main; complete the persistent signing setup.
-2. Build a real F06 candidate and commit its integrated source to fork main;
-   manually review the source/signature/compatibility record, then explicitly
-   publish with the protected F07 workflow. A review registry entry must not
-   be inferred from the local device or generated automatically.
-3. Manually run *Fork F08 — Read-Only Published Manager Qualification* on main,
-   supplying the exact published `f07-v*` tag. Review the signed-audit artifact
-   and run logs on the exact workflow HEAD.
-4. Only F09 may pursue physical Android installation, manager allowlist
-   authorization, persistent signer continuity and update/reinstall behavior.
-
-The F07 registry is **not** required to remain empty forever: once the
-operator adds source-reviewed entries, the existing F07 regression suite must
-still exercise those current entries instead of imposing an obsolete empty-only
-test. The reviewed registry is currently empty, so no F07 release can yet be
-approved or audited.
+Run the audit before the original provider artifact retention expires and keep
+the actual report plus both original archives in private durable storage. The
+released `f06-signed-provenance.json` preserves the original reviewed report, but
+expired/missing provider archives still block a new full hosted F08 acceptance;
+retained proof alone is not a substitute for independently fetched provider
+identity. No automatic bypass is implemented. F09 must test the actual signed
+manager on a physical device separately. No reviewed release is currently
+configured or claimed accepted.

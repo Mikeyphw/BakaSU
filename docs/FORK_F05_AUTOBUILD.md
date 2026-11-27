@@ -32,3 +32,7 @@ python3 -B scripts/fork/source_contract.py --check
 ```
 
 Only GitHub Actions may invoke Gradle. Source changes require the native Devtool source-qualified overlay lifecycle and a reviewed PR. See `fork-gap03-qualification.md` for the journal and promotion evidence boundaries.
+
+## GAP-04 signing transition
+
+The GAP-03 owner journal is the durable authority. After exact native promotion and reservation, use its read-only `export-signing-reservation` command and separately review the emitted immutable row and persistent certificate in the F06 policy. Do not re-integrate upstream in F06. See `FORK_F06_SIGNED_QUALIFICATION.md`.

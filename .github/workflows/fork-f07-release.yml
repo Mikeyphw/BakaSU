@@ -2,6 +2,8 @@ name: Fork F07 — Reviewed Signed Manager Release
 
 # No automatic publication. Run only after a reviewed registry entry and a
 # green F06 signed qualification run on this fork's default branch.
+run-name: F07/${{ inputs.tag }}/${{ inputs.f06_run_id }}
+
 on:
   workflow_dispatch:
     inputs:
@@ -18,6 +20,12 @@ on:
         required: true
         type: choice
         options: [beta, stable]
+
+      resume:
+        description: Explicitly reconcile an existing exact draft or published transaction; never create
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -53,11 +61,18 @@ jobs:
           F06_RUN_ID: ${{ inputs.f06_run_id }}
           F07_TAG: ${{ inputs.tag }}
           F07_CHANNEL: ${{ inputs.channel }}
+          F07_RESUME: ${{ inputs.resume }}
         shell: bash
         run: |
           set -euo pipefail
+          extra=()
+          case "$F07_RESUME" in
+            true) extra+=(--resume) ;;
+            false) ;;
+            *) exit 2 ;;
+          esac
           python3 -B scripts/fork/f07_release.py \
             --f06-run-id "$F06_RUN_ID" \
             --tag "$F07_TAG" \
             --channel "$F07_CHANNEL" \
-            --publish
+            --publish "${extra[@]}"

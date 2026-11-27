@@ -12,6 +12,8 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0,str(ROOT/'scripts'/'fork'))
 import f07_release as f07
+import release_lineage as lineage
+import gap04_fixtures as fixtures
 
 HEAD='a'*40
 FORK_SHA='b'*40
@@ -21,25 +23,21 @@ TAG='f07-v1.2.3-beta.1'
 APKNAME='BakaSU_v1.2.3_40005-arm64-v8a-release.apk'
 
 
+ROW=fixtures.reservation(HEAD,'d'*40,FORK_SHA)
+POLICY=fixtures.policy(ROW,CERT)
+
+
 def approved():
-    return {'f06RunId':RUN,'tag':TAG,'channel':'beta','sourceMergedSha':HEAD,
-            'sourceForkSha':FORK_SHA,'certificateSha256':CERT,'managerUapi':3,
-            'minimumKernelSuVersion':40000,'versionCode':40005}
+    return fixtures.review(ROW,FORK_SHA,CERT,RUN,tag=TAG)
 
 
 def registry(items=None):
-    return {'schemaVersion':1,'repository':f07.REPO,'defaultBranch':'main',
+    return {'schemaVersion':2,'repository':f07.REPO,'defaultBranch':'main',
             'approvedCandidates':items if items is not None else [approved()]}
 
 
 def signed():
-    return {'schemaVersion':1,'repository':f07.REPO,
-            'status':'signed-verified','mode':'F06-signed-artifact-not-a-release',
-            'releaseQualified':False,'deviceQualified':False,'compatibilityQualified':False,
-            'certificateSha256':CERT,
-            'source':{'forkSha':FORK_SHA,'mergedSha':HEAD,'mergedTreeSha':'d'*40,
-                      'upstreamSha':'e'*40,'channel':'beta','upstreamEventId':100},
-            'apks':[]}
+    return fixtures.signed(ROW,FORK_SHA,CERT,RUN)
 
 
 class ReleaseSecurityTests(unittest.TestCase):
@@ -47,7 +45,7 @@ class ReleaseSecurityTests(unittest.TestCase):
         # A hard-coded empty-only test becomes obsolete on the first reviewed
         # release. Validate the live registry, with no implicit approvals.
         doc=json.loads((ROOT/'config/fork-release-review.json').read_text())
-        self.assertEqual(doc.get('schemaVersion'), 1)
+        self.assertEqual(doc.get('schemaVersion'), 2)
         self.assertEqual(doc.get('repository'), f07.REPO)
         self.assertEqual(doc.get('defaultBranch'), 'main')
         rows=doc.get('approvedCandidates')
@@ -79,9 +77,7 @@ class ReleaseSecurityTests(unittest.TestCase):
                 f07.reviewed_entry(registry(),RUN,tag,ch)
 
     def test_only_successful_F06_fork_main_run(self):
-        run={'id':RUN,'status':'completed','conclusion':'success',
-             'event':'workflow_dispatch','head_branch':'main','head_sha':FORK_SHA,
-             'head_repository':{'full_name':f07.REPO},'path':f07.RUN_PATH,'run_attempt':1}
+        run=fixtures.run_info(approved())
         f07.run_identity(run,approved())
         for k,v in [('status','queued'),('event','pull_request'),('conclusion','failure'),
                     ('head_sha',HEAD),('path','.github/workflows/evil.yml'),('head_branch','feature/a')]:
@@ -89,25 +85,27 @@ class ReleaseSecurityTests(unittest.TestCase):
             with self.subTest(k=k),self.assertRaises(f07.Refused):f07.run_identity(bad,approved())
 
     def test_f06_evidence_must_match_committed_source_and_cert(self):
-        with mock.patch.object(f07.subprocess,'run',return_value=mock.Mock(returncode=0)):
-            f07.source_identity(signed(),approved(),git_checker=lambda *argv: (HEAD if '^{commit}' in argv[1] else 'd'*40))
+        with (mock.patch.object(lineage,'ancestor',return_value=True),
+              mock.patch.object(lineage,'committed_source'),
+              mock.patch.object(lineage,'signer_continuity'),
+              mock.patch.object(lineage,'policy_at',return_value=POLICY)):
+            f07.source_identity(signed(),approved(),head=HEAD)
             for key,value in [('certificateSha256','f'*64),('releaseQualified',True)]:
                 changed=signed();changed[key]=value
                 with self.subTest(key=key),self.assertRaises(f07.Refused):
-                    f07.source_identity(changed,approved(),git_checker=lambda *a: HEAD)
-            with self.assertRaises(f07.Refused):
-                f07.source_identity(signed(),approved(),git_checker=lambda *args:'f'*40)
+                    f07.source_identity(changed,approved(),head=HEAD)
+            with mock.patch.object(lineage,'committed_source',side_effect=lineage.Refused('tree drift')):
+                with self.assertRaises(f07.Refused):f07.source_identity(signed(),approved(),head=HEAD)
 
     def test_absent_integrated_source_on_main_refused(self):
-        with mock.patch.object(f07.subprocess,'run',return_value=mock.Mock(returncode=1)):
-            with self.assertRaises(f07.Refused):
-                f07.source_identity(signed(),approved(),git_checker=lambda *a:HEAD if 'commit' in a[1] else 'd'*40)
+        with mock.patch.object(lineage,'ancestor',return_value=False), self.assertRaises(f07.Refused):
+            f07.source_identity(signed(),approved(),head=HEAD)
 
     def test_signed_apk_inventory_and_abi(self):
         record=signed();payload=b'F07_TEST_BLOB'*10000
         record['apks']=[{'fileName':APKNAME,'sha256':hashlib.sha256(payload).hexdigest(),
                           'sizeBytes':len(payload),'packageName':f07.PACKAGE,'versionCode':40005,
-                          'versionName':'v1.2.3','signerCertificateSha256':CERT}]
+                          'versionName':'v1.2.3','nativeAbis':['arm64-v8a'],'signerCertificateSha256':CERT}]
         self.assertEqual(f07.asset_names(record,approved()),{APKNAME})
         broken=json.loads(json.dumps(record));broken['apks'][0]['versionCode']=40004
         with self.assertRaises(f07.Refused):f07.asset_names(broken,approved())
@@ -117,7 +115,8 @@ class ReleaseSecurityTests(unittest.TestCase):
             metadata={**record['apks'][0]}
             with (mock.patch.object(f07,'sdk_tool',return_value=Path('/fake/tool')),
                   mock.patch.object(f07,'apk_metadata',return_value=metadata)):
-                report=f07.prepare_candidate(approved(),record,apkdir,out,root)
+                entry=fixtures.pin_signed(root/'signed.json',record,approved())
+                report=f07.prepare_candidate(entry,record,apkdir,out,root,root/'signed.json')
             m=json.loads((out/'manager-compatibility.json').read_text())
             self.assertEqual(m['apks'][0]['managerUapi'],3)
             self.assertEqual(m['apks'][0]['minimumKernelSuVersion'],40000)
@@ -128,24 +127,24 @@ class ReleaseSecurityTests(unittest.TestCase):
         record=signed();payload=b'Z'*100500
         record['apks']=[{'fileName':APKNAME,'sha256':hashlib.sha256(payload).hexdigest(),
                           'sizeBytes':len(payload),'packageName':f07.PACKAGE,'versionCode':40005,
-                          'versionName':'v1.2.3','signerCertificateSha256':CERT}]
+                          'versionName':'v1.2.3','nativeAbis':['arm64-v8a'],'signerCertificateSha256':CERT}]
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);(root/'apks').mkdir();(root/'out').mkdir()
             (root/'apks'/APKNAME).write_bytes(b'Y'*len(payload))
             with (mock.patch.object(f07,'sdk_tool',return_value=Path('/fake/tool')),
                   mock.patch.object(f07,'apk_metadata',return_value=record['apks'][0])):
                 with self.assertRaises(f07.Refused):
-                    f07.prepare_candidate(approved(),record,root/'apks',root/'out',root)
+                    f07.prepare_candidate(approved(),record,root/'apks',root/'out',root,root/'signed.json')
 
     def test_version_code_history_monotonic(self):
-        releases=[{'draft':False,'assets':[{'name':'BakaSU_old_40004-arm64-v8a-release.apk'}]},
-                  {'draft':True,'assets':[{'name':'BakaSU_draft_90000-arm64-v8a-release.apk'}]}]
+        releases=[{'id':1,'tag_name':'prior','draft':False,'assets':[{'name':'BakaSU_old_40004-arm64-v8a-release.apk'}]},
+                  {'id':2,'tag_name':'draft','draft':True,'assets':[{'name':'BakaSU_draft_90000-arm64-v8a-release.apk'}]}]
         with mock.patch.object(f07,'api',return_value=releases):
             f07.check_previous_versions(40005)
             with self.assertRaises(f07.Refused): f07.check_previous_versions(40004)
 
     def test_existing_release_tag_or_api_probe_error_refuses(self):
-        with mock.patch.object(f07,'command',return_value=mock.Mock(returncode=0,stderr='')):
+        with mock.patch.object(f07,'command',return_value=mock.Mock(returncode=0,stderr='',stdout=json.dumps({'ref':'refs/tags/'+TAG,'object':{'type':'commit','sha':HEAD}}))):
             with self.assertRaises(f07.Refused):f07.preflight_release_tag(TAG)
         with mock.patch.object(f07,'command',return_value=mock.Mock(returncode=1,stderr='HTTP 403 Forbidden')):
             with self.assertRaises(f07.Refused):f07.preflight_release_tag(TAG)
