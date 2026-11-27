@@ -17,7 +17,7 @@ from event_journal import require,sha,integer,MAX_VERSION,REPO
 
 MAX_PATHS=48
 MAX_RELEASE_PAGES=20
-APK=re.compile(r'BakaSU_(.+)_([1-9][0-9]{0,9})-(arm64-v8a|armeabi-v7a|x86_64|universal)-release\.apk\Z')
+APK=re.compile(r'BakaSU_(.+)_([1-9][0-9]{0,9})-(arm64-v8a|armeabi-v7a|x86_64|riscv64|universal)-release\.apk\Z')
 HEX256=re.compile(r'^[0-9a-f]{64}$')
 
 

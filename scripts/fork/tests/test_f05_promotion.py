@@ -12,6 +12,7 @@ import zipfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import event_journal as j
 import promotion_plan as p
+import release_lineage as lineage
 import f05_source_build as build
 from journal_cli import review
 from journal_store import LocalJournal
@@ -119,6 +120,25 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(reserved['versionCode'], 501)
         self.assertEqual(reserved['status'], 'RESERVED_NOT_SIGNED_NOT_PUBLISHED')
         self.assertEqual(review(self.store,self,self.key,self.root,self.artifact,100,commit), reserved)
+
+    def test_journal_export_binds_actual_reserved_tree_and_provider_identity(self):
+        with self.assertRaisesRegex(lineage.Refused,'RESERVATION_MISSING'):
+            lineage.export_reservation(self.store.read(),self.key)
+        commit = self.git('commit-tree', self.report['mergedTreeSha'], '-p', self.fork, '-m', 'reviewed native tree')
+        self.git('reset','--hard',commit)
+        self.remote_main = commit
+        review(self.store,self,self.key,self.root,self.artifact,100,commit)
+        state=self.store.read()
+        row=lineage.export_reservation(state,self.key)
+        self.assertEqual(row['sourceCommit'],commit)
+        self.assertEqual(row['sourceTree'],self.report['mergedTreeSha'])
+        self.assertEqual(row['diagnosticArtifactSha256'],self.digest)
+        self.assertEqual(row['versionCode'],501)
+        self.assertEqual(lineage.export_reservation(self.store.read(),self.key),row)
+        lineage.committed_source(self.root,row,commit)
+        self.assertEqual(self.store.read(),state)
+        with self.assertRaises(lineage.Refused):
+            lineage.validate_reservation(dict(row,versionCode=502))
 
     def test_wrong_release_asset_fails_closed(self):
         class Unknown:

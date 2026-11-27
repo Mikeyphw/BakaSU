@@ -1,79 +1,69 @@
 name: Fork F06 — Source-Pinned Signed Manager Qualification
 
-# Deliberately no push, tag, schedule, PR, release or publishing trigger.
-# The workflow is available only on the default branch after source review.
-run-name: F06/${{ inputs.channel }}/${{ inputs.upstream_sha }}/${{ inputs.fork_sha }}
+# Manual, reviewed source and protected persistent signer; no publication.
+run-name: F06/${{ inputs.reservation_id }}/${{ inputs.version_code }}/${{ inputs.fork_sha }}
 
 on:
   workflow_dispatch:
     inputs:
-      channel:
-        type: choice
-        options: [beta, stable]
-        required: true
-      upstream_sha:
-        description: Exact upstream source commit (40 lowercase hex)
+      reservation_id:
+        description: Reviewed journal reservation SHA-256
         type: string
         required: true
-      upstream_event_id:
-        description: Upstream beta Actions run ID or stable release ID
+      version_code:
+        description: Exact reserved global versionCode
         type: string
         required: true
       fork_sha:
-        description: Expected fork default-branch HEAD (40 lowercase hex)
+        description: Expected fork default-branch workflow HEAD
         type: string
         required: true
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: fork-f06-sign-${{ inputs.channel }}-${{ inputs.upstream_sha }}-${{ inputs.fork_sha }}
+  group: fork-f06-sign-${{ inputs.reservation_id }}
   cancel-in-progress: false
 
 jobs:
   signed-manager-qualification:
-    if: github.ref == 'refs/heads/main'
+    if: github.repository == 'Mikeyphw/BakaSU' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     environment: fork-signing
     steps:
-      - name: Checkout fork main (no persisted credentials)
+      - name: Checkout exact reviewed workflow source
         uses: actions/checkout@v7
         with:
-          ref: main
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Prove default-branch source identity before integration
-        env:
-          EXPECTED_FORK_SHA: ${{ inputs.fork_sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$EXPECTED_FORK_SHA" =~ ^[a-f0-9]{40}$ ]]
-          test "$GITHUB_SHA" = "$EXPECTED_FORK_SHA"
-          test "$(git rev-parse HEAD)" = "$EXPECTED_FORK_SHA"
-          test -z "$(git status --porcelain=v1 --untracked-files=all)"
       - name: Validate all existing fork contracts
         run: |
           python3 -B scripts/fork/source_contract.py --check
           python3 -B -m unittest discover -s scripts/fork/tests -p 'test_*.py' -v
-      - name: Verify upstream event and integrate exact commit in disposable checkout
+      - name: Verify promoted committed tree and reserved version (no upstream merge)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          F06_CHANNEL: ${{ inputs.channel }}
-          F06_UPSTREAM_SHA: ${{ inputs.upstream_sha }}
-          F06_EVENT_ID: ${{ inputs.upstream_event_id }}
+          GITHUB_TOKEN: ${{ github.token }}
+          F06_RESERVATION: ${{ inputs.reservation_id }}
+          F06_VERSION: ${{ inputs.version_code }}
           F06_FORK_SHA: ${{ inputs.fork_sha }}
         shell: bash
         run: |
           set -euo pipefail
-          python3 -B scripts/fork/f05_source_build.py stage \
-            --channel "$F06_CHANNEL" --upstream-sha "$F06_UPSTREAM_SHA" \
-            --event-id "$F06_EVENT_ID" --fork-sha "$F06_FORK_SHA" \
-            --report "$GITHUB_WORKSPACE/f06-f05-source.json"
-      - name: Revalidate integrated source before unlocking the signer
+          [[ "$F06_VERSION" =~ ^[1-9][0-9]{0,9}$ ]]
+          mkdir -m 700 "$RUNNER_TEMP/f06"
+          python3 -B scripts/fork/f06_signing.py stage \
+            --reservation-id "$F06_RESERVATION" --version-code "$F06_VERSION" \
+            --fork-sha "$F06_FORK_SHA" --checkout "$RUNNER_TEMP/f06/source" \
+            --output "$RUNNER_TEMP/f06/f06-promoted-source.json"
+      - name: Revalidate actual promoted source before unlocking signer
+        shell: bash
         run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/f06/source"
           python3 -B scripts/fork/source_contract.py --check
           python3 -B -m unittest discover -s scripts/fork/tests -p 'test_*.py' -v
       - name: Setup Java 21 and hosted Gradle
@@ -81,8 +71,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Setup Gradle
+      - name: Setup Gradle without credential-bearing caches
         uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
       - name: Prepare persistent signing identity (no key in logs or output)
         env:
           FORK_SIGNER_KEYSTORE_B64: ${{ secrets.FORK_SIGNER_KEYSTORE_B64 }}
@@ -94,17 +86,21 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B scripts/fork/f06_signing.py prepare \
-            --source "$GITHUB_WORKSPACE/f06-f05-source.json" \
-            --manager "$GITHUB_WORKSPACE/manager" --scratch "$RUNNER_TEMP"
-      - name: Build fork-isolated signed manager (hosted only)
-        working-directory: manager
+            --source "$RUNNER_TEMP/f06/f06-promoted-source.json" \
+            --manager "$RUNNER_TEMP/f06/source/manager" --scratch "$RUNNER_TEMP/f06"
+      - name: Build reviewed fork source at the reserved version (hosted only)
+        env:
+          F06_VERSION: ${{ inputs.version_code }}
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$F06_VERSION" =~ ^[1-9][0-9]{0,9}$ ]]
+          cd "$RUNNER_TEMP/f06/source/manager"
           ./gradlew spotlessCheck :app:assembleRelease \
             -PKSU_PACKAGE_NAME=com.mikeyphw.bakasu \
-            --no-configuration-cache --no-daemon --stacktrace
-      - name: Verify every APK signature, signer identity and package metadata
+            -PBAKASU_RESERVED_VERSION_CODE="$F06_VERSION" \
+            --no-configuration-cache --no-daemon
+      - name: Verify every APK signature and reserved package version
         env:
           FORK_SIGNER_CERT_SHA256: ${{ secrets.FORK_SIGNER_CERT_SHA256 }}
           EXPECTED_FORK_SHA: ${{ inputs.fork_sha }}
@@ -112,31 +108,32 @@ jobs:
         run: |
           set -euo pipefail
           python3 -B scripts/fork/f06_signing.py verify \
-            --source "$GITHUB_WORKSPACE/f06-f05-source.json" \
-            --apk-dir "$GITHUB_WORKSPACE/manager/app/build/outputs/apk/release" \
-            --output "$GITHUB_WORKSPACE/f06-signed-provenance.json" \
+            --source "$RUNNER_TEMP/f06/f06-promoted-source.json" \
+            --checkout "$RUNNER_TEMP/f06/source" \
+            --apk-dir "$RUNNER_TEMP/f06/source/manager/app/build/outputs/apk/release" \
+            --output "$RUNNER_TEMP/f06/f06-signed-provenance.json" \
             --fork-sha "$EXPECTED_FORK_SHA"
       - name: Scrub ephemeral Gradle signing properties and keystore
         if: always()
         shell: bash
         run: |
           python3 -B scripts/fork/f06_signing.py cleanup \
-            --manager "$GITHUB_WORKSPACE/manager" --scratch "$RUNNER_TEMP"
-      - name: Upload source and signer provenance (not release qualification)
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: f06-source-and-signer-evidence-${{ github.run_id }}
-          path: |
-            f06-f05-source.json
-            f06-signed-provenance.json
-          if-no-files-found: warn
-          retention-days: 30
-      - name: Upload signed manager diagnostic APKs (NOT a GitHub release)
+            --manager "$RUNNER_TEMP/f06/source/manager" --scratch "$RUNNER_TEMP/f06"
+      - name: Upload exact attempt signer provenance (not release qualification)
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: f06-signed-manager-diagnostic-${{ github.run_id }}
-          path: manager/app/build/outputs/apk/release/*.apk
+          name: f06-source-and-signer-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/f06/f06-promoted-source.json
+            ${{ runner.temp }}/f06/f06-signed-provenance.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload exact attempt signed diagnostic APKs (NOT a GitHub release)
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: f06-signed-manager-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/f06/source/manager/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 14

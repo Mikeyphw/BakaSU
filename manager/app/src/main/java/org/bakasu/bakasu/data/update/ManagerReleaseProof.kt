@@ -11,7 +11,7 @@ internal object ManagerReleaseProof {
     private val hash = Regex("[a-f0-9]{64}")
     private val commit = Regex("[a-f0-9]{40}")
     private val tag = Regex("f07-v[0-9][A-Za-z0-9._-]{0,75}")
-    private val filename = Regex("BakaSU_[A-Za-z0-9._+-]+_[0-9]+-(arm64-v8a|armeabi-v7a|x86_64|universal)-release\\.apk")
+    private val filename = Regex("BakaSU_[A-Za-z0-9._+-]+_[0-9]+-(arm64-v8a|armeabi-v7a|x86_64|riscv64|universal)-release\\.apk")
     private val nativeAbis = setOf("arm64-v8a", "armeabi-v7a", "x86_64", "riscv64")
     const val MAX_APK = 1_073_741_824L
 

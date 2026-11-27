@@ -13,6 +13,8 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'scripts' / 'fork'))
 import f06_signing as signing
+from gap04_fixtures import reservation,policy,stage
+import release_lineage as lineage
 
 FORK = 'a'*40
 UPSTREAM = 'b'*40
@@ -22,12 +24,18 @@ CERT = 'e'*64
 PACKAGE = 'com.mikeyphw.bakasu'
 
 
-def make_report(root: Path, status: str = 'source-integrated') -> Path:
-    p = root / 'f05.json'
-    p.write_text(json.dumps({'schemaVersion':1, 'mode':'F05-unsigned-diagnostic-only',
-                             'status':status,'channel':'beta','forkSha':FORK,
-                             'upstreamSha':UPSTREAM,'mergedSha':MERGED,
-                             'mergedTreeSha':TREE,'upstreamEventId':123}))
+ROW=reservation(MERGED,TREE,FORK,34567)
+POLICY=policy(ROW,CERT)
+ENV={'GITHUB_SHA':FORK,'GITHUB_RUN_ID':'310','GITHUB_RUN_ATTEMPT':'1'}
+APK='BakaSU_v1_34567-arm64-v8a-release.apk'
+BADGING=f"package: name='{PACKAGE}' versionCode='34567' versionName='v1'\nnative-code: 'arm64-v8a'\n"
+
+
+def make_report(root: Path, status: str = 'source-promoted-reviewed') -> Path:
+    p=root/'f06.json'
+    record=stage(ROW,FORK,CERT)
+    record['status']=status
+    p.write_text(json.dumps(record))
     return p
 
 
@@ -52,23 +60,23 @@ class F06SigningSecurity(unittest.TestCase):
             with self.subTest(invalid=invalid):
                 with self.assertRaises(signing.Refused): signing.fingerprint(invalid)
 
-    def test_source_must_be_f05_verified_exact_fork(self):
+    def test_source_must_be_promoted_reviewed_exact_fork(self):
         with tempfile.TemporaryDirectory() as t:
             src=make_report(Path(t))
-            self.assertEqual(signing.source(src, expected_fork=FORK)['mergedSha'], MERGED)
+            self.assertEqual(signing.source(src, expected_fork=FORK,policy=POLICY)['reservation']['sourceCommit'], MERGED)
             with self.assertRaises(signing.Refused):
-                signing.source(src, expected_fork='f'*40)
+                signing.source(src, expected_fork='f'*40,policy=POLICY)
             with self.assertRaises(signing.Refused):
-                signing.source(src, channel='stable')
+                signing.source(src, channel='stable',policy=POLICY)
             make_report(Path(t), 'failed')
             with self.assertRaises(signing.Refused):
-                signing.source(src)
+                signing.source(src,policy=POLICY)
 
     def test_apk_identity_requires_exact_cert_v2_and_package(self):
         with tempfile.TemporaryDirectory() as t:
-            p=Path(t)/'Manager-universal-release.apk'
+            p=Path(t)/APK
             p.write_bytes(b'A'*100_005)
-            valid="package: name='" + PACKAGE + "' versionCode='34567' versionName='v1'"
+            valid=BADGING
             with mock.patch.object(signing,'command',side_effect=[output_signer(),valid]):
                 result=signing.apk_metadata(p,'aapt','apksigner',CERT,PACKAGE)
             self.assertEqual(result['versionCode'],34567)
@@ -93,10 +101,10 @@ class F06SigningSecurity(unittest.TestCase):
                 f.write_text('#!/bin/sh\nexit 0\n')
                 f.chmod(0o700)
             out_dir=root/'out';out_dir.mkdir()
-            (out_dir/'Manager-universal-release.apk').write_bytes(b'A'*100_001)
+            (out_dir/APK).write_bytes(b'A'*100_001)
             report=root/'attestation.json'
-            mocked=[output_signer(),f"package: name='{PACKAGE}' versionCode='34567' versionName='v1'"]
-            with mock.patch.object(signing,'checkout_identity'), mock.patch.object(signing,'command',side_effect=mocked):
+            mocked=[output_signer(),BADGING]
+            with mock.patch.object(signing,'checkout_identity'), mock.patch.object(signing,'command',side_effect=mocked), mock.patch.object(signing,'contract',return_value=POLICY), mock.patch.object(signing,'github_context'), mock.patch.dict(os.environ,ENV):
                 result=signing.verify(src,out_dir,report,expected_cert=CERT,
                                       sdk=root/'sdk',expected_fork=FORK)
             self.assertEqual(result['status'],'signed-verified')
@@ -104,7 +112,7 @@ class F06SigningSecurity(unittest.TestCase):
             self.assertFalse(result['deviceQualified'])
             self.assertFalse(result['compatibilityQualified'])
             self.assertEqual(len(result['apks']),1)
-            with mock.patch.object(signing,'checkout_identity'), self.assertRaises(signing.Refused):
+            with mock.patch.object(signing,'checkout_identity'), mock.patch.object(signing,'contract',return_value=POLICY), mock.patch.object(signing,'github_context'), mock.patch.dict(os.environ,ENV), self.assertRaises(signing.Refused):
                 signing.verify(src,out_dir,report,expected_cert=CERT,
                                sdk=root/'sdk',expected_fork=FORK)
 
@@ -115,15 +123,16 @@ class F06SigningSecurity(unittest.TestCase):
             props=manager/'gradle.properties'
             original=b'org.gradle.jvmargs=-Xmx1g\n';props.write_bytes(original)
             src=make_report(root)
-            environment={'GITHUB_SHA':FORK,'FORK_SIGNER_KEYSTORE_B64':base64.b64encode(b'Q'*1024).decode(),
+            environment={**ENV,'FORK_SIGNER_KEYSTORE_B64':base64.b64encode(b'Q'*1024).decode(),
                          'FORK_SIGNER_STORE_PASSWORD':'hello_world_secret',
                          'FORK_SIGNER_KEY_PASSWORD':'another_secret',
                          'FORK_SIGNER_KEY_ALIAS':'my-signing-key',
                          'FORK_SIGNER_CERT_SHA256':CERT}
-            with mock.patch.object(signing,'github_context'), mock.patch.object(signing,'checkout_identity'):
+            with mock.patch.object(signing,'github_context'), mock.patch.object(signing,'checkout_identity'), mock.patch.object(signing,'contract',return_value=POLICY), mock.patch.object(signing,'verify_keystore'):
                 result=signing.prepare(src,manager,scratch,environment)
             self.assertEqual(result['expectedCertificateSha256'],CERT)
             self.assertIn(b'KEYSTORE_FILE=',props.read_bytes())
+            self.assertEqual(props.stat().st_mode & 0o777,0o600)
             self.assertEqual((scratch/'f06-manager-key.jks').stat().st_mode & 0o777,0o600)
             signing.cleanup(manager,scratch)
             self.assertEqual(props.read_bytes(),original)
@@ -136,9 +145,9 @@ class F06SigningSecurity(unittest.TestCase):
             scratch=root/'scratch';scratch.mkdir()
             (manager/'gradle.properties').write_text('org.gradle.jvmargs=-Xmx1g\n')
             src=make_report(root)
-            with mock.patch.object(signing,'github_context'), mock.patch.object(signing,'checkout_identity'):
+            with mock.patch.object(signing,'github_context'), mock.patch.object(signing,'checkout_identity'), mock.patch.object(signing,'contract',return_value=POLICY), mock.patch.object(signing,'verify_keystore'):
                 with self.assertRaises(signing.Refused):
-                    signing.prepare(src,manager,scratch,{'GITHUB_SHA':FORK})
+                    signing.prepare(src,manager,scratch,ENV)
             self.assertFalse((scratch/'f06-manager-key.jks').exists())
 
     def test_f06_workflow_only_manual_default_branch_nonrelease(self):
@@ -152,7 +161,9 @@ class F06SigningSecurity(unittest.TestCase):
         self.assertIn("github.ref == 'refs/heads/main'",text)
         self.assertIn('environment: fork-signing',text)
         self.assertIn('persist-credentials: false',text)
-        self.assertIn('f05_source_build.py stage',text)
+        self.assertIn('f06_signing.py stage',text)
+        self.assertNotIn('f05_source_build.py stage',text)
+        self.assertIn('BAKASU_RESERVED_VERSION_CODE',text)
         self.assertIn('com.mikeyphw.bakasu',text)
         self.assertIn('f06_signing.py verify',text)
         self.assertIn('f06_signing.py cleanup',text)
