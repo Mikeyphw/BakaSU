@@ -53,6 +53,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - name: Exercise historical ZIP and APK compatibility policies
+        run: python3 -B ../scripts/fork/gap02_policy_probe.py
       - uses: gradle/actions/setup-gradle@v6
       # Run the SAME formatter as upstream Lints Check. Produce a reviewable
       # patch artifact on failure, never auto-commit or silently relax lint.

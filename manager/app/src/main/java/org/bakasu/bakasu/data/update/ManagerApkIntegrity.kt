@@ -6,6 +6,7 @@ import android.os.Build
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
+import java.util.zip.ZipFile
 import org.bakasu.bakasu.BuildConfig
 
 /** Fail-closed APK byte, package, version and installed-certificate continuity. */
@@ -18,10 +19,12 @@ object ManagerApkIntegrity {
         expectedSha256: String,
         expectedBytes: Long,
         expectedVersionCode: Int,
+        expectedSigner: String,
+        expectedAbi: String,
     ) {
         require(
             sha256Regex.matches(expectedSha256) && expectedBytes > 100_000L &&
-                expectedVersionCode > 0,
+                expectedVersionCode > 0 && sha256Regex.matches(expectedSigner),
         ) { "Incomplete signed release metadata" }
         require(!apk.isSymbolicLink() && apk.isFile && apk.length() == expectedBytes) {
             "APK size or file safety mismatch"
@@ -65,11 +68,25 @@ object ManagerApkIntegrity {
         val installedCerts = installed.certificatesSha256()
         require(
             candidateCerts.size == 1 && installedCerts.size == 1 &&
-                candidateCerts.single() == installedCerts.single(),
+                candidateCerts.single() == installedCerts.single() && candidateCerts.single() == expectedSigner,
         ) {
             "APK signer does not match the installed fork"
         }
+        val archiveAbis = ZipFile(apk).use { zip ->
+            zip.entries().asSequence().map { it.name.split('/') }
+                .filter { it.size == 3 && it[0] == "lib" && it[2].endsWith(".so") }
+                .map { it[1] }.toSet()
+        }
+        require(ManagerReleaseProof.supportsArchiveAbi(expectedAbi, Build.SUPPORTED_ABIS.toList(), archiveAbis)) {
+            "APK native ABI differs from selected release or device"
+        }
     }
+
+    @Suppress("DEPRECATION")
+    fun installedCertificate(context: Context): String? = runCatching {
+        val flag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+        context.packageManager.getPackageInfo(BuildConfig.APPLICATION_ID, flag).certificatesSha256().singleOrNull()
+    }.getOrNull()
 
     private fun File.isSymbolicLink(): Boolean = runCatching {
         java.nio.file.Files.isSymbolicLink(toPath())

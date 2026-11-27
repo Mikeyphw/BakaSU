@@ -5,4 +5,5 @@ data class ModuleUpdateMetadata(
     val version: String,
     val changelog: String,
     val versionCode: Int = 0,
+    val historicalProof: ModuleUpdateVerification.Registry? = null,
 )

@@ -1,5 +1,6 @@
 package org.bakasu.bakasu.data.network
 
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -14,6 +15,8 @@ data class NetworkResponse(
     val body: String?,
     val headers: Map<String, List<String>>,
     val url: String = "",
+    val bodySha256: String? = null,
+    val bodySize: Long? = null,
 ) {
     fun header(name: String): String? = headers.entries
         .firstOrNull { (key, _) -> key.equals(name, ignoreCase = true) }
@@ -68,6 +71,8 @@ class NetworkRequestRepository(
             }
             response.use {
                 if (!response.isSuccessful) throw HttpStatusException(response.code)
+                var bodySha256: String? = null
+                var bodySize: Long? = null
                 NetworkResponse(
                     body = response.body?.let { body ->
                         if (maxResponseBytes == null) {
@@ -80,11 +85,16 @@ class NetworkRequestRepository(
                                 if (source.read(buffer, minOf(8192L, maxResponseBytes - buffer.size + 1)) == -1L) break
                             }
                             check(buffer.size <= maxResponseBytes) { "Response too large" }
-                            buffer.readString(body.contentType()?.charset(Charsets.UTF_8) ?: Charsets.UTF_8)
+                            val bytes = buffer.readByteArray()
+                            bodySize = bytes.size.toLong()
+                            bodySha256 = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 255) }
+                            bytes.toString(body.contentType()?.charset(Charsets.UTF_8) ?: Charsets.UTF_8)
                         }
                     },
                     headers = response.headers.toMultimap(),
                     url = response.request.url.toString(),
+                    bodySha256 = bodySha256,
+                    bodySize = bodySize,
                 )
             }
         }

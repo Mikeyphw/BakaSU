@@ -5,7 +5,6 @@ import android.net.Uri
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
-import java.util.Properties
 import org.apache.commons.compress.archivers.zip.ZipFile
 
 /** Immutable private copy before module-ID verification and flashing. */
@@ -21,6 +20,7 @@ object ReinstallArchiveVerifier {
         expectedModuleId: String,
         expectedSha256: String?,
         expectedSize: Long?,
+        expectedArchiveVersionCode: Int,
     ): File {
         require(safeId.matches(expectedModuleId)) { "Invalid installed module ID" }
         require(expectedSha256 == null || sha256Pattern.matches(expectedSha256)) { "Invalid digest" }
@@ -111,10 +111,7 @@ object ReinstallArchiveVerifier {
                     }
                     output.toByteArray()
                 }
-                val prop = Properties().also { it.load(bytes.inputStream()) }
-                require(prop.getProperty("id") == expectedModuleId) {
-                    "ZIP module ID is different from installed module"
-                }
+                ModuleArchiveIdentity.verify(bytes, expectedModuleId, expectedArchiveVersionCode)
             }
             return copy
         } catch (failure: Exception) {

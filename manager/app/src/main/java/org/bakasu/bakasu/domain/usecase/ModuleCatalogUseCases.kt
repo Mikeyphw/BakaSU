@@ -13,6 +13,7 @@ import org.bakasu.bakasu.domain.model.CatalogModule
 import org.bakasu.bakasu.domain.model.DocumentPolicy
 import org.bakasu.bakasu.domain.model.ModuleReadme
 import org.bakasu.bakasu.domain.model.ModuleRelease
+import org.bakasu.bakasu.domain.model.ModuleUpdateMetadata
 import org.bakasu.bakasu.domain.model.ModuleUpdateVerification
 import org.bakasu.bakasu.domain.model.RepositoryApiType
 
@@ -53,6 +54,8 @@ class LoadModuleIconUseCase(private val repository: ModuleIconRepository) {
 
 class ResolveModuleUpdateUseCase(private val repository: KernelSuRegistryRepository) {
     suspend operator fun invoke(moduleId: String, updateJsonUrl: String, zipUrl: String, versionCode: Int) = repository.resolveUpdate(moduleId, updateJsonUrl, zipUrl, versionCode)
+
+    suspend fun historical(moduleId: String, updateJsonUrl: String, installedCode: Int, offered: ModuleUpdateMetadata) = repository.historicalReinstall(moduleId, updateJsonUrl, installedCode, offered)
 
     fun isCurrent(update: ModuleUpdateVerification.Registry): Boolean = repository.isCurrent(update)
 }

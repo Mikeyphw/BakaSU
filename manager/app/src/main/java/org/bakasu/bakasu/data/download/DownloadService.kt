@@ -68,6 +68,8 @@ class DownloadService : Service() {
         const val EXTRA_MANAGER_EXPECTED_VERSION_CODE = "managerExpectedVersionCode"
         const val EXTRA_MANAGER_UAPI = "managerRequiredUapi"
         const val EXTRA_MANAGER_KSU_MIN = "managerMinimumKernelSuVersion"
+        const val EXTRA_MANAGER_SIGNER = "managerReviewedSigner"
+        const val EXTRA_MANAGER_SELECTED_ABI = "managerSelectedAbi"
         const val EXTRA_EXPECTED_SIZE = "expectedSize"
         const val EXTRA_EXPECTED_SHA256 = "expectedSha256"
 
@@ -143,12 +145,15 @@ class DownloadService : Service() {
                 val expectedBytes = intent.getLongExtra(EXTRA_EXPECTED_SIZE, -1L)
                 val expectedManagerUapi = intent.getIntExtra(EXTRA_MANAGER_UAPI, -1)
                 val expectedKsuMinimum = intent.getIntExtra(EXTRA_MANAGER_KSU_MIN, -1)
+                val expectedSigner = intent.getStringExtra(EXTRA_MANAGER_SIGNER)
+                val expectedAbi = intent.getStringExtra(EXTRA_MANAGER_SELECTED_ABI)
                 if (source != SOURCE_DIRECT_APK ||
                     !url.startsWith("https://github.com/Mikeyphw/BakaSU/releases/download/f07-v") ||
                     expectedVersionCode <= 0 ||
                     expectedHash == null || !expectedHash.matches(Regex("[a-f0-9]{64}")) ||
                     expectedBytes <= 100_000L || expectedBytes > 1_073_741_824L ||
-                    expectedManagerUapi <= 0 || expectedKsuMinimum <= 0
+                    expectedManagerUapi <= 0 || expectedKsuMinimum <= 0 ||
+                    expectedSigner == null || !expectedSigner.matches(Regex("[a-f0-9]{64}")) || expectedAbi == null
                 ) {
                     downloadRepository.markFailed(downloadId, "Unverified manager release metadata")
                     return START_NOT_STICKY
@@ -165,6 +170,8 @@ class DownloadService : Service() {
                     expectedBytes,
                     expectedManagerUapi,
                     expectedKsuMinimum,
+                    expectedSigner,
+                    expectedAbi,
                 )
             }
 
@@ -307,6 +314,8 @@ class DownloadService : Service() {
         expectedBytes: Long,
         expectedManagerUapi: Int,
         expectedKsuMinimum: Int,
+        expectedSigner: String,
+        expectedAbi: String,
     ) {
         val job = serviceScope.launch {
             val target = resolveAvailableTarget(
@@ -339,6 +348,8 @@ class DownloadService : Service() {
                     expectedHash,
                     expectedBytes,
                     expectedVersionCode,
+                    expectedSigner,
+                    expectedAbi,
                 )
                 val uri = Uri.fromFile(target)
                 downloadRepository.markCompleted(id, uri.toString())
@@ -354,6 +365,8 @@ class DownloadService : Service() {
                         expectedVersionCode,
                         expectedManagerUapi,
                         expectedKsuMinimum,
+                        expectedSigner,
+                        expectedAbi,
                     ),
                 )
             } catch (e: CancellationException) {
@@ -543,6 +556,8 @@ class DownloadService : Service() {
         expectedVersionCode: Int,
         expectedManagerUapi: Int,
         expectedKsuMinimum: Int,
+        expectedSigner: String,
+        expectedAbi: String,
     ): android.app.Notification {
         // Never send an APK directly to the package installer from a stale
         // notification: an internal activity performs final source and kernel checks.
@@ -553,6 +568,8 @@ class DownloadService : Service() {
             putExtra(EXTRA_MANAGER_EXPECTED_VERSION_CODE, expectedVersionCode)
             putExtra(EXTRA_MANAGER_UAPI, expectedManagerUapi)
             putExtra(EXTRA_MANAGER_KSU_MIN, expectedKsuMinimum)
+            putExtra(EXTRA_MANAGER_SIGNER, expectedSigner)
+            putExtra(EXTRA_MANAGER_SELECTED_ABI, expectedAbi)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         val installPendingIntent = PendingIntent.getActivity(

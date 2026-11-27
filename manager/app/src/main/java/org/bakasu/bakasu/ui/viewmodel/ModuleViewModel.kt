@@ -136,6 +136,13 @@ class ModuleViewModel(
         if (module.remove || module.update || candidate.versionCode < module.versionCode) {
             return ModuleUpdateVerification.Rejected
         }
+        // Re-fetch the complete historical anchor and selected release before flashing.
+        val historical = candidate.historicalProof
+        if (historical != null) {
+            val offered = module.moduleUpdate ?: return ModuleUpdateVerification.Rejected
+            val current = resolveModuleUpdate.historical(module.id, module.updateJson, module.versionCode, offered)
+            return if (current == candidate) historical else ModuleUpdateVerification.Rejected
+        }
         return resolveModuleUpdate(module.id, module.updateJson, candidate.zipUrl, candidate.versionCode)
     }
 
@@ -149,6 +156,7 @@ class ModuleViewModel(
                 !installed.remove &&
                 !installed.update &&
                 installed.versionCode == module.versionCode &&
+                installed.dirId == module.dirId && installed.enabled == module.enabled &&
                 installed.updateJson == module.updateJson &&
                 installed.moduleReinstall != null &&
                 installed.moduleReinstall == module.moduleReinstall &&

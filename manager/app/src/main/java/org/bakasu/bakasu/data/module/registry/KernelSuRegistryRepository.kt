@@ -11,7 +11,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import okhttp3.CacheControl
@@ -24,8 +26,10 @@ import org.bakasu.bakasu.data.network.documentResponse
 import org.bakasu.bakasu.domain.model.CatalogModule
 import org.bakasu.bakasu.domain.model.DocumentFormat
 import org.bakasu.bakasu.domain.model.DocumentPolicy
+import org.bakasu.bakasu.domain.model.ExpectedFile
 import org.bakasu.bakasu.domain.model.HttpStatusException
 import org.bakasu.bakasu.domain.model.ModuleReadme
+import org.bakasu.bakasu.domain.model.ModuleUpdateMetadata
 import org.bakasu.bakasu.domain.model.ModuleUpdateVerification
 import org.bakasu.bakasu.domain.model.RepositoryApiType
 import org.bakasu.bakasu.domain.model.RepositoryError
@@ -50,6 +54,7 @@ class KernelSuRegistryRepository private constructor(
     }
 
     private val commitMutex = Mutex()
+    private val historicalRequests = Semaphore(3)
     private val details = ConcurrentHashMap<String, ApiModuleDetail>()
     private val diskCache = FileRegistryCache(
         File(application.filesDir, "module_registry").let { root ->
@@ -235,6 +240,74 @@ class KernelSuRegistryRepository private constructor(
             ?: client.loadDetail(module.moduleId).detail.also { rememberDetail(it) }
         if (module.registryMetadata?.buildId != detail.buildId) throw BuildMismatchException("README build changed")
         client.loadReadme(detail)?.let { ModuleReadme(it.html, client.baseUrl, DocumentFormat.HTML, DocumentPolicy.SameOrigin(client.baseUrl)) }
+    }
+
+    private data class HistoricalDiscovery(val anchored: Boolean, val candidate: ModuleUpdateMetadata?)
+
+    /** A configured feed origin or a unique immutable offered ZIP anchors historical lookup. */
+    suspend fun historicalReinstall(
+        moduleId: String,
+        updateJsonUrl: String,
+        installedCode: Int,
+        offered: ModuleUpdateMetadata,
+    ): ModuleUpdateMetadata? {
+        if (!RegistryParser.isValidModuleId(moduleId) || !RegistryUrls.isHttpsUrl(updateJsonUrl) ||
+            !RegistryUrls.isAllowedReleaseDownloadUrl(offered.zipUrl) || offered.versionCode <= installedCode
+        ) {
+            return null
+        }
+        val configured = configuredBaseUrls()
+        val owner = ownerForUrl(updateJsonUrl)
+        if (owner == null && configured.any { RegistryUrls.isSameOrigin(updateJsonUrl, it) }) return null
+        val sources = if (owner != null) listOf(owner) else configured
+        // Never fan out unbounded network requests or silently choose among independent registries.
+        if (sources.size !in 1..8) return null
+        return historicalRequests.withPermit {
+            try {
+                sources.map { forSource(it).historicalForSource(moduleId, installedCode, offered) }
+                    .filter { it.anchored }.singleOrNull()?.candidate
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
+    private suspend fun historicalForSource(moduleId: String, installedCode: Int, offered: ModuleUpdateMetadata): HistoricalDiscovery = withClient {
+        // A fresh index is necessary before absence in any configured source is authoritative.
+        val catalog = client.loadCatalog()
+        if (catalog.error != null || catalog.catalog.fromCache) throw RegistryFormatException("Historical index unavailable")
+        if (catalog.catalog.find(moduleId) == null) return@withClient HistoricalDiscovery(false, null)
+        // Cached or stale documents are useful for browsing, never for discovering a new flash candidate.
+        val loaded = client.loadDetail(moduleId)
+        val detail = loaded.detail
+        if (loaded.fromCache || loaded.catalog.fromCache || loaded.error != null ||
+            detail.id != moduleId || detail.kind != RegistryKind.MODULE || detail.health?.status == "stale" ||
+            detail.buildId != loaded.catalog.buildId
+        ) {
+            throw RegistryFormatException("Historical detail is not current")
+        }
+        val records = detail.releases.map {
+            HistoricalZipRecord(it.tag, it.versionCode, it.zip.url, it.zip.size, it.zip.sha256, it.immutable)
+        }
+        if (HistoricalZipPolicy.anchor(offered.versionCode, offered.zipUrl, records) == null) {
+            return@withClient HistoricalDiscovery(HistoricalZipPolicy.claimsAnchor(offered.zipUrl, records), null)
+        }
+        val selected = HistoricalZipPolicy.select(installedCode, offered.versionCode, offered.zipUrl, records)
+            ?: return@withClient HistoricalDiscovery(true, null)
+        val release = detail.releases.singleOrNull { it.tag == selected.tag } ?: return@withClient HistoricalDiscovery(true, null)
+        if (!RegistryUrls.isAllowedReleaseDownloadUrl(release.zip.url)) return@withClient HistoricalDiscovery(true, null)
+        rememberDetail(detail)
+        val proof = ModuleUpdateVerification.Registry(
+            release.zip.url,
+            ExpectedFile(release.zip.size, release.zip.sha256),
+            RegistryCatalogMapper.release(release),
+            moduleId,
+            detail.buildId,
+            client.baseUrl,
+        )
+        HistoricalDiscovery(true, ModuleUpdateMetadata(release.zip.url, release.version, "", release.versionCode, proof))
     }
 
     suspend fun resolveUpdate(moduleId: String, updateJsonUrl: String, zipUrl: String, versionCode: Int): ModuleUpdateVerification {

@@ -6,6 +6,8 @@ package org.bakasu.bakasu.domain.model
 data class ManagerCompatibilityRequirements(
     val managerUapi: Int,
     val minimumKernelSuVersion: Int,
+    val signerCertificateSha256: String? = null,
+    val abi: String? = null,
 )
 
 enum class ManagerCompatibilityVerdict {
