@@ -101,7 +101,7 @@ static struct kretprobe *syscall_unregfunc_rp = NULL;
 static void ksu_sys_enter_handler(void *data, struct pt_regs *regs, long id)
 {
     // we need handle arm64 kernel with arm32 userspace
-// clang-format off
+    // clang-format off
 #ifdef CONFIG_COMPAT
     #if defined(__x86_64__)
         if (unlikely(in_compat_syscall()))
