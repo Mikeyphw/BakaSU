@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "repository": "Mikeyphw/BakaSU",
+  "repository_id": 1462243855,
+  "workflows": [
+    {
+      "path": ".github/workflows/auto-label.yml",
+      "name": "Auto Label Issues",
+      "role": "inherited-review"
+    },
+    {
+      "path": ".github/workflows/build-lkm.yml",
+      "name": "Build LKM for KernelSU",
+      "role": "inherited-review"
+    },
+    {
+      "path": ".github/workflows/build-manager.yml",
+      "name": "Build Manager",
+      "role": "inherited-review"
+    },
+    {
+      "path": ".github/workflows/codeql.yml",
+      "name": "CodeQL",
+      "role": "supplemental",
+      "observed_workflow_id": 422131210
+    },
+    {
+      "path": ".github/workflows/ddk-lkm.yml",
+      "name": "Build KernelSU Kernel Module",
+      "role": "inherited-review"
+    },
+    {
+      "path": ".github/workflows/fork-f06-signed-manager.yml",
+      "name": "Fork F06 — Source-Pinned Signed Manager Qualification",
+      "role": "protected",
+      "observed_workflow_id": 422668529
+    },
+    {
+      "path": ".github/workflows/fork-f07-release.yml",
+      "name": "Fork F07 — Reviewed Signed Manager Release",
+      "role": "protected"
+    },
+    {
+      "path": ".github/workflows/fork-f08-release-qualification.yml",
+      "name": "Fork F08 — Read-Only Published Manager Qualification",
+      "role": "protected"
+    },
+    {
+      "path": ".github/workflows/fork-manager-ci.yml",
+      "name": "Fork Manager Baseline Qualification",
+      "role": "required"
+    },
+    {
+      "path": ".github/workflows/fork-source-build.yml",
+      "name": "Fork Source-Pinned Manager Build (F05)",
+      "role": "diagnostic",
+      "observed_workflow_id": 422668538
+    },
+    {
+      "path": ".github/workflows/fork-upstream-discovery.yml",
+      "name": "Fork Upstream Discovery (F04)",
+      "role": "diagnostic",
+      "observed_workflow_id": 422668545
+    },
+    {
+      "path": ".github/workflows/ksud.yml",
+      "name": "Build ksud",
+      "role": "inherited-review"
+    },
+    {
+      "path": ".github/workflows/ksuinit.yml",
+      "name": "Build ksuinit",
+      "role": "inherited-review"
+    },
+    {
+      "path": ".github/workflows/lints-check.yml",
+      "name": "Lints Check",
+      "role": "required"
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "name": "Release",
+      "role": "inherited-review"
+    }
+  ]
+}

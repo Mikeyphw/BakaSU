@@ -21,8 +21,8 @@ class CommittedRequiredCIContracts(unittest.TestCase):
         self.assertEqual(raw["event"], "pull_request")
         self.assertEqual(raw["release_qualification"], "separate")
         self.assertEqual(raw["required_workflows"], [
-            {"name": "Fork Manager Baseline Qualification", "workflow_id": 420307178},
-            {"name": "Lints Check", "workflow_id": 420303004},
+            {"name": "Fork Manager Baseline Qualification", "workflow_id": 422131211},
+            {"name": "Lints Check", "workflow_id": 422130394},
         ])
         self.assertEqual(len({x["workflow_id"] for x in raw["required_workflows"]}), 2)
 
@@ -41,8 +41,10 @@ class CommittedRequiredCIContracts(unittest.TestCase):
         baseline = BASELINE.read_text(encoding="utf-8")
         self.assertIn("./gradlew :app:assembleDebug", baseline)
         self.assertIn("./gradlew spotlessCheck", baseline)
-        self.assertIn("test_*.py", baseline)
-        self.assertIn("git diff --check", baseline)
+        self.assertIn("scripts/fork/ci_gate.py source", baseline)
+        gate = (ROOT / "scripts/fork/ci_gate.py").read_text(encoding="utf-8")
+        self.assertIn("test_*.py", gate)
+        self.assertIn('"diff", "--check"', gate)
 
     def test_not_mislabelled_as_release_or_device_qualified(self):
         policy = json.loads(POLICY.read_text(encoding="utf-8"))

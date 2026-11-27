@@ -1,2 +1,3 @@
 [project]
 runner = "python"
+test_command = "python3 -B -m unittest discover -s scripts/fork/tests -p 'test_*.py' -v"

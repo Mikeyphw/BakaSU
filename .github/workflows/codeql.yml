@@ -16,8 +16,6 @@ on:
 
 jobs:
   pre_job:
-    # Do not skip if triggered by schedule
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -25,7 +23,18 @@ jobs:
     outputs:
       should_skip: ${{ steps.skip_check.outputs.should_skip }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate exact checkout, source and workflow contracts
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B scripts/fork/ci_gate.py source
       - id: skip_check
+        if: github.event_name != 'schedule'
         uses: fkirc/skip-duplicate-actions@v5
         with:
           skip_after_successful_duplicate: 'true'
@@ -34,7 +43,7 @@ jobs:
   analyze:
     name: Analyze
     needs: pre_job
-    if: github.event_name == 'schedule' || needs.pre_job.outputs.should_skip != 'true'
+    if: needs.pre_job.result == 'success' && (github.event_name == 'schedule' || needs.pre_job.outputs.should_skip != 'true')
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -55,6 +64,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Verify exact checkout
+        run: python3 -B ../scripts/fork/ci_gate.py checkout
 
       - name: Setup Java
         uses: actions/setup-java@v6

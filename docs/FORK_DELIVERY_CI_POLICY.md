@@ -1,73 +1,93 @@
 # BakaSU fork — committed Devtool delivery CI policy
 
-Repository: `Mikeyphw/BakaSU` · target branch: `feature/f01-fork-manager-baseline-20261115` · PR #1.
-This repair follows F05's already committed and pushed source `25ee23c91be6aebd8c009c8460b5ed92a1a05823`.
+## Current repository identity and required workflow registrations
 
-## Required checks
+Repository: `Mikeyphw/BakaSU`, GitHub repository ID `1462243855`, default branch `main`.
+The former fork ID `1460223693` and its old workflow IDs must not be used.
+Authenticated Actions run history (2026-11-27) binds the following workflow IDs
+and paths to the restored repository:
 
-`config/delivery-required-ci.json` declares the exact active provider workflow IDs:
+| Workflow | ID | Historical evidence |
+|---|---:|---|
+| Fork Manager Baseline Qualification | 422131211 | run 44312475887, PR |
+| Lints Check | 422130394 | run 44312476061, PR; run 45935721171, push |
+| CodeQL (supplemental) | 422131210 | run 44312475914, PR |
+| Fork Upstream Discovery (F04) | 422668545 | run 45931928483, schedule |
+| Fork Source-Pinned Manager Build (F05) | 422668538 | run 45890689648, dispatch |
+| Fork F06 — Source-Pinned Signed Manager Qualification | 422668529 | run 44320446153, dispatch |
 
-- `Fork Manager Baseline Qualification` — `420307178` (Python contracts, Spotless, manager debug build and whitespace)
-- `Lints Check` — `420303004` (upstream formatter, Rust/C and manager lint checks)
+The first two are required by `config/delivery-required-ci.json`; they have
+unconditional PR triggers, independent push verification, and manual dispatch.
+Observed IDs do not establish current registration state. The remaining nine
+source workflow paths are inventoried in `config/fork-ci-workflows.json` without
+inventing provider IDs. The inherited `check-line-ending.yml` is not a source
+file: the actual line-ending gate remains within Lints Check.
 
-Both workflows must register for every `pull_request`, including policy-only changes.
-The baseline's previous `pull_request.paths` filter has been removed because
-Devtool's native CI registrar cannot prove a path-filtered required workflow
-will be triggered for every commit; it fails closed rather than counting skips.
-No tests or gates are removed, and the existing `workflow_dispatch` remains.
+## Read-only registration reconciliation
 
-`CodeQL` (`420306787`) remains enabled for manager changes but has manager-only
-path filters. It is supplemental, not declared universally required, because
-Devtool correctly refuses uncertain conditional registration. If universal
-CodeQL becomes an explicit acceptance requirement, update its trigger and this
-policy together, without guessing runs or treating skips as passes.
+The shared source gate runs `python3 -B scripts/fork/ci_inventory.py` and checks
+the complete source roster. It deliberately reports `registration_status: NOT_CHECKED`
+unless actual provider evidence is supplied. Both required workflows invoke
+`ci_inventory.py --github-api` with read-only contents/actions permission after
+the source gate, before expensive fan-out; a failed provider GET or missing
+required registration blocks qualification. In an authenticated owner terminal,
+collect repository metadata and the complete paginated Actions workflow registry
+using `gh api repos/Mikeyphw/BakaSU` and
+`gh api --paginate --slurp repos/Mikeyphw/BakaSU/actions/workflows` into private
+JSON files. Run `ci_inventory.py --repository-json REPO_JSON --registrations-json WORKFLOWS_JSON`.
+A missing, inactive, renamed or wrong-ID required workflow is a failure. Other
+missing or unexpected registrations are separately marked `REVIEW_REQUIRED`;
+the tool is read-only and never enables, dispatches or modifies workflows.
+Protected release and inherited kernel workflows require separate authorization.
 
-## Delivery and recovery
+## Source-first dependency graph
 
-This is a new source-pinned native Devtool overlay. The F05 source commit and
-durable session `340cd09a843543b09a5c16432bd24620` are **not replayed**.
-The new v3.1 source-pinned .pyz is generated using the canonical builder on
-Termux and applied only through native `validate overlay` / `apply overlay`.
-The policy is now committed; the source-bound v3.1 launcher may run
-`apply --approve-remote --watch-ci`. The resulting **new** delivery session
-is authoritative; never reuse the old-fork session or replay F05.
-A non-green CI result does not undo a committed push.
+Both required workflows run a shared strict checkout, inventory, source contract,
+full fork unittest and changed-line whitespace check before costly fan-out.
+Every child validates its own checkout against the run's GitHub SHA. The
+original manager debug, Spotless, ClangFormat, Rustfmt (both workspaces), Clippy,
+ShellCheck, line ending and Android lint contexts remain intact. Independent
+aggregate jobs fail unless every prerequisite and child reports `success`;
+skipped, cancelled, failed or missing results are not success. No local Gradle.
+CodeQL retains its supplemental path filters and duplicate suppression for
+non-scheduled events; the prerequisite itself always runs, including scheduled
+events, and its failure prevents analysis. Scheduled analysis is not suppressed
+by the duplicate-check step.
 
-The CI policy verifies hosted tests on the actual new PR commit; it does not
-qualify signing, installation, devices, releases, or automatic merging.
+The actual Android lint failure on run 45935721171 was dependency download HTTP
+429 (Maven Central), wrapped in a Gradle configuration-cache serialization error.
+The hosted-only lint route uses `lintDebug --no-configuration-cache --no-daemon
+--stacktrace`, preserves the original failure, and retries only an identified
+Maven Central download HTTP 429, at most twice with 15/30-second delays. No
+Gradle task, lint finding, compiler warning, source test or real failure is waived.
+The existing Gradle cache setup remains. The actual native `make check-format`
+gate is unchanged and now prints the formatter version; the hosted ClangFormat
+failure must be resolved and reverified,
+not treated as a dependency outage or suppressed. No automatic formatting commit.
 
-## Remaining limitations
+## Devtool integration and acceptance
 
-GitHub Actions workflow registration may be delayed or disabled. No local tests
-are accepted as a substitute for the actual published PR HEAD, and old green
-workflow runs do not count. F05's debug APK remains a CI diagnostic artifact.
+`.devtool.toml` declares the Python runner and the actual fork unittest command,
+which does not execute local Gradle or kernel builds. Apply source modifications
+through the current source-bound Devtool native lifecycle on a named feature
+branch. A current exact-PR-head required CI result and independent CI24 are
+separate from local regression evidence. Do not replay historical delivery
+sessions or count historical successful runs as current qualification.
 
-## GitHub fork identity after refork (2026-11-16)
+F04 scheduled discovery is observed working after merge. F05's latest failure
+is a real upstream merge conflict; keep the fail-closed integration behavior and
+handle durable reviewed promotion in GAP-03. Signing, release registration,
+physical-device qualification and automatic merging remain separate and are not
+approved or proven here. No source promotion, release or signing mutation is
+part of this CI policy repair.
 
-New repository ID: `1460223693` (parent `Baka-SU/BakaSU`). GitHub reassigns workflow IDs
-on a new fork, even when workflow paths and names are unchanged.
-The post-refork required identities are manager `420307178`, lint `420303004`
-and supplemental CodeQL `420306787`. Both required workflows must
-register and pass on the exact **new PR HEAD**; old-fork runs,
-receipts and PR numbers never qualify the new GitHub repository.
-Use native Devtool delivery status/ci against the new session.
-Do not treat CI, debug artifacts, signing or device tests as interchangeable.
+### Mixed native source qualification (GAP-01)
 
-## Rust formatting workflow: maintained blocking gate
-
-The required `Lints Check` workflow keeps the job name `Rustfmt check` and
-checks both `userspace/ksud` and `userspace/ksuinit` with **direct**
-`cargo +nightly fmt --all --manifest-path ... -- --check` commands.
-The shell exits on any formatter failure; the third-party
-`LoliGothick/rustfmt-check@master` JavaScript wrapper was removed after a
-PR-only Node runtime `TypeError` (Actions run `43929420726`, job
-`133517549139`) obscured the actual formatter result.
-No Rust formatting, lint, Android or security assurance is waived.
-`test_rustfmt_ci_contract.py` is discovered by the existing hosted
-`test_*.py` suite and includes negative cases for missing workspaces,
-missing `--check`, suppressed exit status, removed required jobs and return of
-the obsolete wrapper. The required workflow's provider ID and trigger remain
-unchanged. A passing push run does not replace a failing PR run; qualify the
-**new** PR HEAD only after both required workflows complete successfully.
-F06 persistent-key signing, releases and physical device validation are
-separate milestones and are not established by this CI repair.
+The existing two locked Rust workspaces, nested Gradle 9.8.0 manager,
+reviewed kernel Makefile/DDK matrix, and JS package are separate native
+qualification roots. The WebUI library now has an offline dependency-free
+lockfile, real Node tests, strict declaration compilation and an ESLint gate.
+`test_bakasu_native_layout.py` exercises safe host-only shell and C fixtures;
+no Android installer, real kernel build, or Gradle task runs as a side effect
+of the Python test suite. Hosted Android, kernel and device evidence remain
+separate; a missing tool is not a successful native check.

@@ -3,26 +3,58 @@ name: Lints Check
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   checks: write
 
 jobs:
+  source-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate exact checkout, source and workflow contracts
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python3 -B scripts/fork/ci_gate.py source
+      - name: Reconcile current required workflow registrations (read-only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/fork/ci_inventory.py --github-api
+
   clang-format:
+    needs: source-contract
     name: ClangFormat check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Verify exact checkout
+        run: python3 -B scripts/fork/ci_gate.py checkout
 
       - name: Check
         working-directory: kernel
-        run: make check-format
+        run: |
+          set -euo pipefail
+          clang-format --version
+          make check-format
 
   rustfmt:
+    needs: source-contract
     name: Rustfmt check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Verify exact checkout
+        run: python3 -B scripts/fork/ci_gate.py checkout
 
       - uses: dtolnay/rust-toolchain@nightly
         with:
@@ -38,12 +70,15 @@ jobs:
           cargo +nightly fmt --all --manifest-path userspace/ksuinit/Cargo.toml -- --check
 
   clippy:
+    needs: source-contract
     name: Clippy check
     runs-on: ubuntu-latest
     env:
       RUSTFLAGS: "-Dwarnings"
     steps:
       - uses: actions/checkout@v7
+      - name: Verify exact checkout
+        run: python3 -B scripts/fork/ci_gate.py checkout
 
       - run: |
           rustup update nightly
@@ -69,10 +104,13 @@ jobs:
           cargo ndk -t x86_64 clippy
 
   shellcheck:
+    needs: source-contract
     name: ShellCheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Verify exact checkout
+        run: python3 -B scripts/fork/ci_gate.py checkout
 
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@2.0.0
@@ -81,6 +119,7 @@ jobs:
           ignore_paths: ./userspace/ksud/src/android/module/installer.sh ./.github/scripts/setup-rust-build.sh
 
   check-crlf:
+    needs: source-contract
     name: Check Line Endings
     runs-on: ubuntu-latest
     steps:
@@ -88,6 +127,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Verify exact checkout
+        run: python3 -B scripts/fork/ci_gate.py checkout
 
       - name: Regenerate Git Index based on .gitattributes
         run: |
@@ -103,8 +144,10 @@ jobs:
           fi
 
   android-lint:
+    needs: source-contract
     name: Check Manager Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: ./manager
@@ -113,6 +156,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Verify exact checkout
+        run: python3 -B ../scripts/fork/ci_gate.py checkout
 
       - name: Setup Java
         uses: actions/setup-java@v6
@@ -128,4 +173,53 @@ jobs:
 
       - name: Check Manager Lint
         run: |
-          ./gradlew lintDebug
+          python3 -B ../scripts/fork/ci_gate.py hosted-lint
+
+  webui-contract:
+    needs: source-contract
+    name: WebUI library contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify exact checkout
+        run: python3 -B scripts/fork/ci_gate.py checkout
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Verify dependency-free lock and run library checks
+        run: |
+          npm --prefix js ci --ignore-scripts --offline --no-audit --no-fund
+          node --check js/index.js
+          node --check js/index.test.mjs
+          node --check js/eslint.config.mjs
+          npm --prefix js test
+          npm exec --yes --package typescript@5.8.3 -- tsc --noEmit --strict --target ES2022 --module node16 js/index.types.test.ts
+          npm exec --yes --package eslint@9.25.1 -- eslint --config js/eslint.config.mjs --max-warnings=0 js/index.js js/index.test.mjs js/eslint.config.mjs
+
+  qualification:
+    name: Lints Required Result
+    if: ${{ always() }}
+    needs: [source-contract, clang-format, rustfmt, clippy, shellcheck, check-crlf, android-lint, webui-contract]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Require every lint gate to succeed
+        env:
+          SOURCE_RESULT: ${{ needs.source-contract.result }}
+          CLANG_RESULT: ${{ needs.clang-format.result }}
+          RUSTFMT_RESULT: ${{ needs.rustfmt.result }}
+          CLIPPY_RESULT: ${{ needs.clippy.result }}
+          SHELL_RESULT: ${{ needs.shellcheck.result }}
+          CRLF_RESULT: ${{ needs.check-crlf.result }}
+          ANDROID_RESULT: ${{ needs.android-lint.result }}
+          WEBUI_RESULT: ${{ needs.webui-contract.result }}
+        run: |
+          set -euo pipefail
+          for result in "$SOURCE_RESULT" "$CLANG_RESULT" "$RUSTFMT_RESULT" "$CLIPPY_RESULT" "$SHELL_RESULT" "$CRLF_RESULT" "$ANDROID_RESULT" "$WEBUI_RESULT"; do
+            test "$result" = success
+          done

@@ -163,7 +163,10 @@ class F06SigningSecurity(unittest.TestCase):
         flow=(ROOT/'.github/workflows/fork-manager-ci.yml')
         if flow.exists():
             text=flow.read_text()
-            self.assertIn("-p 'test_*.py'",text)
+            self.assertIn("scripts/fork/ci_gate.py source", text)
+            gate = (ROOT / "scripts/fork/ci_gate.py").read_text()
+            self.assertIn('"test_*.py"', gate)
+            self.assertIn('"unittest", "discover"', gate)
             self.assertIn('spotlessCheck',text)
             self.assertIn('assembleDebug',text)
 
