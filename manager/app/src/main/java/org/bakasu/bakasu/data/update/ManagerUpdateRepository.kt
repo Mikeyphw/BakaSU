@@ -1,11 +1,14 @@
 package org.bakasu.bakasu.data.update
 
+import android.app.Application
 import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.bakasu.bakasu.BuildConfig
+import org.bakasu.bakasu.data.module.registry.RegistryUrls
 import org.bakasu.bakasu.data.network.NetworkRequestRepository
+import org.bakasu.bakasu.domain.model.DocumentPolicy
 import org.bakasu.bakasu.domain.model.ManagerApkSource
 import org.bakasu.bakasu.domain.model.ManagerCompatibilityRequirements
 import org.bakasu.bakasu.domain.model.ManagerUpdateChannel
@@ -15,6 +18,7 @@ import org.json.JSONObject
 
 class ManagerUpdateRepository(
     private val networkRequestRepository: NetworkRequestRepository,
+    private val application: Application,
 ) {
     private companion object {
         const val UPDATE_CALL_TIMEOUT_SECONDS = 8L
@@ -45,6 +49,8 @@ class ManagerUpdateRepository(
         ) {
             return@withContext null
         }
+        val releaseTag = release.optString("tag_name")
+        if (!ManagerReleaseProof.validTag(releaseTag)) return@withContext null
         val changelog = release.optString("body")
         val assets = release.optJSONArray("assets") ?: return@withContext null
         val candidates = mutableListOf<ManagerApkCandidate>()
@@ -53,7 +59,7 @@ class ManagerUpdateRepository(
             val asset = assets.optJSONObject(index) ?: continue
             val parsed = parseApkName(asset.optString("name")) ?: continue
             val downloadUrl = asset.optString("browser_download_url")
-            if (!downloadUrl.startsWith("https://github.com/$REPOSITORY/releases/download/")) continue
+            if (downloadUrl != ManagerReleaseProof.assetUrl(releaseTag, parsed.fileName)) continue
 
             candidates += ManagerApkCandidate(
                 versionName = parsed.versionName,
@@ -67,7 +73,7 @@ class ManagerUpdateRepository(
         }
 
         val candidate = selectCandidate(candidates, supportedAbis) ?: return@withContext null
-        val requirements = resolvePublishedCompatibility(assets, candidate)
+        val requirements = resolvePublishedCompatibility(assets, candidate, releaseTag, "stable")
         return@withContext candidate.toUpdateInfo(ManagerUpdateChannel.STABLE, changelog)
             .copy(compatibilityRequirements = requirements)
     }
@@ -86,13 +92,15 @@ class ManagerUpdateRepository(
             ) {
                 continue
             }
+            val releaseTag = release.optString("tag_name")
+            if (!ManagerReleaseProof.validTag(releaseTag)) continue
             val assets = release.optJSONArray("assets") ?: continue
             val candidates = mutableListOf<ManagerApkCandidate>()
             for (index in 0 until assets.length()) {
                 val asset = assets.optJSONObject(index) ?: continue
                 val parsed = parseApkName(asset.optString("name")) ?: continue
                 val url = asset.optString("browser_download_url")
-                if (!url.startsWith("https://github.com/$REPOSITORY/releases/download/")) continue
+                if (url != ManagerReleaseProof.assetUrl(releaseTag, parsed.fileName)) continue
                 candidates += ManagerApkCandidate(
                     versionName = parsed.versionName,
                     versionCode = parsed.versionCode,
@@ -104,7 +112,7 @@ class ManagerUpdateRepository(
                 )
             }
             val candidate = selectCandidate(candidates, supportedAbis) ?: continue
-            val requirements = resolvePublishedCompatibility(assets, candidate)
+            val requirements = resolvePublishedCompatibility(assets, candidate, releaseTag, "beta")
             return@withContext candidate.toUpdateInfo(
                 ManagerUpdateChannel.BETA,
                 release.optString("body"),
@@ -116,31 +124,53 @@ class ManagerUpdateRepository(
     private suspend fun resolvePublishedCompatibility(
         assets: JSONArray,
         candidate: ManagerApkCandidate,
+        releaseTag: String,
+        channel: String,
     ): ManagerCompatibilityRequirements? {
-        val manifestAsset = (0 until assets.length())
-            .mapNotNull { assets.optJSONObject(it) }
-            .singleOrNull { it.optString("name") == "manager-compatibility.json" }
-            ?: return null
-        val url = manifestAsset.optString("browser_download_url")
-        if (!url.startsWith("https://github.com/$REPOSITORY/releases/download/")) return null
-        val manifest = requestJson(url) ?: return null
+        val digest = candidate.expectedSha256 ?: return null
+        val installedSigner = ManagerApkIntegrity.installedCertificate(application) ?: return null
+        val manifest = verifiedReleaseDocument(assets, releaseTag, "manager-compatibility.json") ?: return null
+        val provenance = verifiedReleaseDocument(assets, releaseTag, "f07-release-provenance.json") ?: return null
         return parseManagerCompatibilityManifest(
             manifest,
-            candidate.fileName,
-            candidate.versionCode,
-            candidate.abi,
+            provenance,
+            ReleaseApkIdentity(candidate.fileName, candidate.versionCode, candidate.abi, digest, candidate.expectedSizeBytes),
+            releaseTag,
+            channel,
+            installedSigner,
         )
     }
 
+    private suspend fun verifiedReleaseDocument(assets: JSONArray, releaseTag: String, name: String): JSONObject? {
+        val asset = (0 until assets.length()).mapNotNull { assets.optJSONObject(it) }.singleOrNull { it.optString("name") == name }
+            ?: return null
+        val expectedUrl = ManagerReleaseProof.assetUrl(releaseTag, name) ?: return null
+        if (asset.optString("browser_download_url") != expectedUrl) return null
+        val digest = releaseSha256(asset) ?: return null
+        val size = asset.optLong("size", -1)
+        if (size !in 1L..1_048_576L) return null
+        val response = networkRequestRepository.request(
+            expectedUrl,
+            forceNetwork = true,
+            callTimeoutSeconds = UPDATE_CALL_TIMEOUT_SECONDS,
+            maxResponseBytes = size,
+            documentPolicy = DocumentPolicy.PublicHttps(),
+        ).getOrNull() ?: return null
+        if (response.bodySha256 != digest || response.bodySize != size || !RegistryUrls.isAllowedDownloadHop(response.url)) return null
+        return runCatching { JSONObject(response.body ?: return null) }.getOrNull()
+    }
+
     private suspend fun requestJsonArray(url: String): JSONArray? = networkRequestRepository
-        .fetch(
+        .request(
             url = url,
             headers = GITHUB_HEADERS,
             forceNetwork = true,
             callTimeoutSeconds = UPDATE_CALL_TIMEOUT_SECONDS,
+            maxResponseBytes = 4L * 1024 * 1024,
+            documentPolicy = DocumentPolicy.SameOrigin("https://api.github.com/"),
         )
         .onFailure { Log.w(TAG, "Fork releases request failed", it) }
-        .mapCatching { JSONArray(it) }
+        .mapCatching { JSONArray(requireNotNull(it.body)) }
         .getOrNull()
 
     fun findNightlyApkEntry(
@@ -160,14 +190,16 @@ class ManagerUpdateRepository(
     }
 
     private suspend fun requestJson(url: String): JSONObject? = networkRequestRepository
-        .fetch(
+        .request(
             url = url,
             headers = GITHUB_HEADERS,
             forceNetwork = true,
             callTimeoutSeconds = UPDATE_CALL_TIMEOUT_SECONDS,
+            maxResponseBytes = 4L * 1024 * 1024,
+            documentPolicy = DocumentPolicy.SameOrigin("https://api.github.com/"),
         )
         .onFailure { Log.w(TAG, "GitHub update request failed", it) }
-        .mapCatching { JSONObject(it) }
+        .mapCatching { JSONObject(requireNotNull(it.body)) }
         .getOrNull()
 
     private suspend fun requestCommitCount(commitSha: String): Int? {
@@ -212,6 +244,9 @@ class ManagerUpdateRepository(
         if (latestVersionCode <= BuildConfig.VERSION_CODE) return null
 
         val latestCandidates = candidates.filter { it.versionCode == latestVersionCode }
+        if (latestCandidates.map { it.fileName }.toSet().size != latestCandidates.size ||
+            latestCandidates.map { it.abi }.toSet().size != latestCandidates.size
+        ) return null
         supportedAbis.forEach { abi ->
             latestCandidates.firstOrNull { it.abi == abi }?.let { return it }
         }

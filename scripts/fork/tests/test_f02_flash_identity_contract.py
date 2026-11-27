@@ -13,9 +13,12 @@ class FlashIdentityContract(unittest.TestCase):
     def test_archive_id_digest_and_safe_entries(self):
         verifier=(BASE/'data/file/ReinstallArchiveVerifier.kt').read_text()
         for token in ('expectedModuleId','expectedSha256','expectedSize',
-                      'actualSha == expectedSha256','prop.getProperty("id") == expectedModuleId',
+                      'actualSha == expectedSha256','ModuleArchiveIdentity.verify(bytes, expectedModuleId, expectedArchiveVersionCode)',
                       'entry.isUnixSymlink','copy.delete()'):
             self.assertIn(token,verifier)
+        identity=(BASE/'data/file/ModuleArchiveIdentity.kt').read_text()
+        self.assertIn('prop.getProperty("id") == expectedModuleId',identity)
+        self.assertIn('prop.getProperty("versionCode")?.toIntOrNull() == expectedVersionCode',identity)
     def test_zip_bomb_constraints(self):
         verifier=(BASE/'data/file/ReinstallArchiveVerifier.kt').read_text()
         self.assertIn('names.size < 10000', verifier)

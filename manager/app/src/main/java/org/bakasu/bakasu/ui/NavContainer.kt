@@ -725,6 +725,8 @@ private fun Route.Flash.toFlashIt(): FlashIt = when (flashType) {
         reinstallWasEnabled,
         reinstallSha256,
         reinstallSize,
+        reinstallArchiveVersionCode,
+        reinstallDirId,
     )
 
     Route.Flash.TYPE_RESTORE -> FlashIt.FlashRestore

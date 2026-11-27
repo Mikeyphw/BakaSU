@@ -101,6 +101,8 @@ sealed interface Route :
         val reinstallWasEnabled: Boolean? = null,
         val reinstallSha256: String? = null,
         val reinstallSize: Long? = null,
+        val reinstallArchiveVersionCode: Int? = null,
+        val reinstallDirId: String? = null,
     ) : Route {
         companion object {
             const val TYPE_BOOT = "boot"
@@ -142,6 +144,8 @@ sealed interface Route :
                 wasEnabled: Boolean,
                 sha256: String?,
                 size: Long?,
+                archiveVersionCode: Int,
+                dirId: String,
             ) = Flash(
                 TYPE_MODULE_UPDATE,
                 uris = listOf(uri),
@@ -150,6 +154,8 @@ sealed interface Route :
                 reinstallWasEnabled = wasEnabled,
                 reinstallSha256 = sha256,
                 reinstallSize = size,
+                reinstallArchiveVersionCode = archiveVersionCode,
+                reinstallDirId = dirId,
             )
             fun restore() = Flash(TYPE_RESTORE)
             fun uninstall() = Flash(TYPE_UNINSTALL)

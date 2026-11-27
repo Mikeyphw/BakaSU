@@ -479,6 +479,8 @@ fun ModulePage(bottomPadding: Dp) {
                                     reinstallModule.enabled,
                                     expectedSha256,
                                     expectedSize,
+                                    requireNotNull(reinstallModule.moduleReinstall).versionCode,
+                                    reinstallModule.dirId,
                                 )
                             },
                         )

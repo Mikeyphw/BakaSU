@@ -1,6 +1,7 @@
 package org.bakasu.bakasu.data.module
 
 import com.topjohnwu.superuser.io.SuFile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -12,6 +13,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.bakasu.bakasu.data.module.registry.KernelSuRegistryRepository
 import org.bakasu.bakasu.data.network.NetworkRequestRepository
 import org.bakasu.bakasu.data.network.NetworkStatusRepository
 import org.bakasu.bakasu.data.shell.KsuCliRepository
@@ -26,6 +28,7 @@ class ModuleRepository(
     private val networkStatusRepository: NetworkStatusRepository,
     private val networkRequestRepository: NetworkRequestRepository,
     private val ksuCliRepository: KsuCliRepository,
+    private val registry: KernelSuRegistryRepository,
 ) {
     private val refreshMutex = Mutex()
     private val mutableInstalledModules = MutableStateFlow(InstalledModulesState())
@@ -77,13 +80,25 @@ class ModuleRepository(
                                 } else {
                                     cached?.moduleUpdate ?: cached?.moduleReinstall
                                 }
+                                val offered = candidate?.takeIf {
+                                    !module.remove && !module.update &&
+                                        it.versionCode >= module.versionCode &&
+                                        isSecureReinstallZipUrl(it.zipUrl)
+                                }
+                                val historical = if (offered != null && offered.versionCode > module.versionCode) {
+                                    if (shouldCheck) {
+                                        registry.historicalReinstall(module.id, module.updateJson, module.versionCode, offered)
+                                    } else {
+                                        cached?.moduleReinstall?.takeIf { previous ->
+                                            previous.historicalProof?.let(registry::isCurrent) == true
+                                        }
+                                    }
+                                } else {
+                                    null
+                                }
                                 module.copy(
                                     moduleUpdate = candidate?.takeIf { it.versionCode > module.versionCode },
-                                    moduleReinstall = candidate?.takeIf {
-                                        !module.remove && !module.update &&
-                                            it.versionCode >= module.versionCode &&
-                                            isSecureReinstallZipUrl(it.zipUrl)
-                                    },
+                                    moduleReinstall = historical ?: offered,
                                 )
                             }
                         }.awaitAll()
@@ -92,6 +107,7 @@ class ModuleRepository(
                 }
             }.onFailure {
                 mutableInstalledModules.update { current -> current.copy(refreshing = false) }
+                if (it is CancellationException) throw it
             }
         }
     }

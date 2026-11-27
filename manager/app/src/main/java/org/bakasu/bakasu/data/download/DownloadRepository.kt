@@ -75,9 +75,12 @@ class DownloadRepository(
             val proof = update.expectedApkSha256
             val length = update.expectedApkSizeBytes
             val compat = update.compatibilityRequirements
+            val signer = compat?.signerCertificateSha256
+            val abi = compat?.abi
             if (proof == null || !proof.matches(Regex("[a-f0-9]{64}")) ||
                 length == null || length <= 100_000L || length > 1_073_741_824L ||
                 compat == null || compat.managerUapi <= 0 || compat.minimumKernelSuVersion <= 0 ||
+                signer == null || !signer.matches(Regex("[a-f0-9]{64}")) || abi == null || abi != update.abi ||
                 update.source !is ManagerApkSource.DirectApk
             ) {
                 markFailed(id, "Unsigned or incomplete fork release evidence")
@@ -89,6 +92,8 @@ class DownloadRepository(
                 putExtra(DownloadService.EXTRA_MANAGER_EXPECTED_VERSION_CODE, update.versionCode)
                 putExtra(DownloadService.EXTRA_MANAGER_UAPI, compat.managerUapi)
                 putExtra(DownloadService.EXTRA_MANAGER_KSU_MIN, compat.minimumKernelSuVersion)
+                putExtra(DownloadService.EXTRA_MANAGER_SIGNER, signer)
+                putExtra(DownloadService.EXTRA_MANAGER_SELECTED_ABI, abi)
                 action = DownloadService.ACTION_DOWNLOAD_MANAGER_APK
                 putExtra(DownloadService.EXTRA_DOWNLOAD_ID, id)
                 putExtra(DownloadService.EXTRA_URL, url)

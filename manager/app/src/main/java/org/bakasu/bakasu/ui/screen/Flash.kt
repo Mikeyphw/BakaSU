@@ -253,6 +253,7 @@ fun FlashScreen(flashIt: FlashIt) {
                     val existing = reinstallModules.installedModules.value.modules.singleOrNull {
                         it.id == flashIt.reinstallModuleId &&
                             it.versionCode == flashIt.reinstallVersionCode &&
+                            it.dirId == flashIt.reinstallDirId &&
                             it.enabled == flashIt.reinstallWasEnabled &&
                             !it.remove && !it.update
                     }
@@ -263,6 +264,7 @@ fun FlashScreen(flashIt: FlashIt) {
                         flashIt.reinstallModuleId,
                         flashIt.reinstallSha256,
                         flashIt.reinstallSize,
+                        requireNotNull(flashIt.reinstallArchiveVersionCode),
                     )
                 }.getOrElse { error ->
                     text += "Reinstall refused: ${error.message ?: "unsafe module ZIP"}\n"
@@ -282,6 +284,7 @@ fun FlashScreen(flashIt: FlashIt) {
                     val matching = reinstallModules.installedModules.value.modules.singleOrNull {
                         it.id == flashIt.reinstallModuleId &&
                             it.versionCode == flashIt.reinstallVersionCode &&
+                            it.dirId == flashIt.reinstallDirId &&
                             it.enabled == flashIt.reinstallWasEnabled && !it.remove && !it.update
                     }
                     if (refreshed.isFailure || matching == null) {
@@ -831,6 +834,8 @@ sealed class FlashIt : Parcelable {
         val reinstallWasEnabled: Boolean? = null,
         val reinstallSha256: String? = null,
         val reinstallSize: Long? = null,
+        val reinstallArchiveVersionCode: Int? = null,
+        val reinstallDirId: String? = null,
     ) : FlashIt() // module update or independently checked reinstall
     data object FlashRestore : FlashIt()
     data object FlashUninstall : FlashIt()

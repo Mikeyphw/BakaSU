@@ -34,6 +34,8 @@ class ManagerInstallGuardActivity : ComponentActivity() {
                 val code = intent.getIntExtra(DownloadService.EXTRA_MANAGER_EXPECTED_VERSION_CODE, -1)
                 val managerUapi = intent.getIntExtra(DownloadService.EXTRA_MANAGER_UAPI, -1)
                 val minKsu = intent.getIntExtra(DownloadService.EXTRA_MANAGER_KSU_MIN, -1)
+                val expectedSigner = intent.getStringExtra(DownloadService.EXTRA_MANAGER_SIGNER) ?: error("Missing reviewed signer")
+                val expectedAbi = intent.getStringExtra(DownloadService.EXTRA_MANAGER_SELECTED_ABI) ?: error("Missing selected ABI")
                 val path = intent.getStringExtra(DownloadService.EXTRA_FILE_PATH)
                     ?: error("Missing downloaded APK")
                 val downloadRoot = Environment.getExternalStoragePublicDirectory(
@@ -73,7 +75,7 @@ class ManagerInstallGuardActivity : ComponentActivity() {
                     val dest = File.createTempFile("fork-install-", ".apk", cacheDir)
                     try {
                         apk.inputStream().use { input -> dest.outputStream().use { input.copyTo(it) } }
-                        ManagerApkIntegrity.verify(this@ManagerInstallGuardActivity, dest, expectedHash, expectedBytes, code)
+                        ManagerApkIntegrity.verify(this@ManagerInstallGuardActivity, dest, expectedHash, expectedBytes, code, expectedSigner, expectedAbi)
                         dest
                     } catch (e: Exception) {
                         dest.delete()
