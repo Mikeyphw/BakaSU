@@ -24,22 +24,12 @@ Target: https://github.com/Mikeyphw/BakaSU
 
 The fork bootstrap creates a draft pull request and does **not** merge it automatically. If Actions is initially disabled on the fork, enable it under Settings → Actions before running the workflow.
 
-## 2026-11-18 post-refork current-state addendum
+## Current post-refork CI integration
 
-This F01 document is historical baseline documentation. The fork is now at
-`feature/f01-fork-manager-baseline-20261115` commit
-`eb68d9d2d5ed02a11d3c9ece76f847b9ca5d0cf1` on recreated GitHub
-repository ID `1462243855`. F02 secure Reinstall, F03 stable compatibility,
-manager APK integrity and F08 digest audit were introduced after F01.
-The original `onUpdateModule(uri)` integration seam was replaced by
-`onUpdateModule(uri, installedModule?, expectedSha256, expectedSize)`,
-which routes a verified reinstall to `Route.Flash.moduleReinstall(...)`.
-Source-contract tests must enforce the current safe route and flash-time
-module identity check, not obsolete F01 callback text.
-
-Current CI: source-contract failed on its obsolete token; manager lint
-failed on formatting. This repair keeps hosted Gradle formatting/build
-as the authoritative gate; no Gradle is run in Termux. CI results and
-physical-device qualification must be verified after native delivery.
-
-Devtool runner policy: the same native overlay adds .devtool.toml with runner = python for source-contract tests. Since the native CLI resolves the initial runner before overlay extraction, a launcher-level explicit runner is still needed for first full apply. No Gradle is run in Termux.
+The historical F01 branch was merged into `main` on 2026-11-18. The current
+repository identity is `1462243855`. See [the committed CI policy](FORK_DELIVERY_CI_POLICY.md)
+for the current provider workflow IDs, exact source-first qualification graph,
+registration reconciliation, and pending independent gates. F02–F08 contain
+subsequent implementations; source presence does not establish full acceptance.
+The source contracts enforce the current verified reinstall and flash-time module
+identity route. No signing, physical-device, or release acceptance is inferred.

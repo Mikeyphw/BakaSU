@@ -5,7 +5,7 @@
   "main": "index.js",
   "types": "index.d.ts",
   "scripts": {
-    "test": "npm run test"
+    "test": "node --test index.test.mjs"
   },
   "repository": {
     "type": "git",
@@ -22,5 +22,6 @@
   "bugs": {
     "url": "https://github.com/tiann/KernelSU/issues"
   },
-  "homepage": "https://github.com/tiann/KernelSU#readme"
+  "homepage": "https://github.com/tiann/KernelSU#readme",
+  "type": "module"
 }

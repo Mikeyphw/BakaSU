@@ -7,3 +7,7 @@ build.sh
 out
 # Devtool runtime state
 /.devtool/
+
+# Python qualification outputs (never source)
+__pycache__/
+.pytest_cache/

@@ -7,11 +7,11 @@
   "required_workflows": [
     {
       "name": "Fork Manager Baseline Qualification",
-      "workflow_id": 420307178
+      "workflow_id": 422131211
     },
     {
       "name": "Lints Check",
-      "workflow_id": 420303004
+      "workflow_id": 422130394
     }
   ]
 }
