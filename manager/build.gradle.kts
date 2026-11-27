@@ -43,7 +43,20 @@ extra["androidBuildToolsVersion"] = "36.1.0"
 extra["androidCompileNdkVersion"] = libs.versions.ndk.get()
 extra["androidSourceCompatibility"] = JavaVersion.VERSION_21
 extra["androidTargetCompatibility"] = JavaVersion.VERSION_21
-extra["managerVersionCode"] = 30000 + getGitCommitCount() + 700
+val reservedForkVersion = providers.gradleProperty("BAKASU_RESERVED_VERSION_CODE").orNull
+extra["managerVersionCode"] = if (reservedForkVersion != null) {
+    require(providers.gradleProperty("KSU_PACKAGE_NAME").orNull == "com.mikeyphw.bakasu") {
+        "Reserved versions are restricted to the fork package"
+    }
+    require(reservedForkVersion.matches(Regex("[1-9][0-9]{0,9}"))) {
+        "Invalid reserved version code"
+    }
+    val code = reservedForkVersion.toLong()
+    require(code < 2100000000L) { "Reserved version code exceeds Android limit" }
+    code.toInt()
+} else {
+    30000 + getGitCommitCount() + 700
+}
 extra["managerVersionName"] = getGitDescribe()
 extra["isPrBuild"] = project.findProperty("IS_PR_BUILD")?.toString()?.toBoolean() ?: false
 extra["defaultManagerPackageName"] = "com.resukisu.resukisu"

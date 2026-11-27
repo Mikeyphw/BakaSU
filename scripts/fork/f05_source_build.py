@@ -196,6 +196,26 @@ def finalize(report_path: Path, apk_dir: Path) -> int:
     return 0
 
 
+def export_bundle(report_path: Path, output: Path, root: Path) -> int:
+    record=json.loads(report_path.read_text(encoding='utf-8'))
+    if record.get('status')!='debug-build-validated' or not all(SHA.fullmatch(str(record.get(k,''))) for k in ('forkSha','mergedSha','mergedTreeSha')):
+        raise StageError('F05_BUNDLE_SOURCE_NOT_QUALIFIED')
+    if git(root,'rev-parse','HEAD')!=record['mergedSha'] or git(root,'rev-parse','HEAD^{tree}')!=record['mergedTreeSha'] or git(root,'status','--porcelain','--untracked-files=no'):
+        raise StageError('F05_BUNDLE_SOURCE_DRIFT')
+    if output.exists() or output.is_symlink():raise StageError('F05_BUNDLE_OUTPUT_EXISTS')
+    if record['mergedSha']==record['forkSha']:
+        record['integrationBundle']=None
+    else:
+        # Export the real merge object and reachable upstream objects; fork
+        # history is a prerequisite. Never recreate an approximate merge SHA.
+        result=subprocess.run(['git','bundle','create',str(output),'HEAD','^'+record['forkSha']],cwd=root,capture_output=True,timeout=120)
+        if result.returncode or not output.is_file() or output.stat().st_size>100_000_000:
+            output.unlink(missing_ok=True);raise StageError('F05_BUNDLE_EXPORT_REFUSED')
+        with output.open('rb') as stream:
+            record['integrationBundle']={'name':output.name,'sha256':hashlib.file_digest(stream,'sha256').hexdigest(),'sizeBytes':output.stat().st_size,'prerequisite':record['forkSha']}
+    report_path.write_text(json.dumps(record,indent=2,sort_keys=True)+'\n',encoding='utf-8');return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest='command', required=True)
@@ -208,8 +228,10 @@ def main(argv=None):
     f = sub.add_parser('finalize')
     f.add_argument('--report', required=True, type=Path)
     f.add_argument('--apk-dir', required=True, type=Path)
+    b=sub.add_parser('export-bundle');b.add_argument('--report',required=True,type=Path);b.add_argument('--output',required=True,type=Path)
     args = p.parse_args(argv)
     try:
+        if args.command=='export-bundle':return export_bundle(args.report,args.output,Path.cwd())
         if args.command == 'stage':
             return stage(Path.cwd(), args.channel, args.upstream_sha, args.event_id, args.fork_sha,
                          args.report, UpstreamClient(os.environ.get('GITHUB_TOKEN', '')))
