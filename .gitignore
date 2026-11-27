@@ -5,3 +5,5 @@ build.sh
 .trae
 /userspace/ksud/.lkm_image_bootstrap.o
 out
+# Devtool runtime state
+/.devtool/
