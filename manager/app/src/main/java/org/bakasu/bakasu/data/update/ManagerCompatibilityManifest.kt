@@ -21,7 +21,9 @@ internal fun parseManagerCompatibilityManifest(
         provenance.optString("compatibilityEvidence") != "reviewed exact-source registry entry" ||
         !ManagerReleaseProof.validSource(provenance.optString("sourceMergedSha")) ||
         !ManagerReleaseProof.validSource(provenance.optString("sourceForkSha")) || provenance.optLong("f06RunId", -1) <= 0
-    ) return null
+    ) {
+        return null
+    }
     val artifacts = manifest.optJSONArray("apks") ?: return null
     val proofRows = provenance.optJSONArray("apks") ?: return null
     if (artifacts.length() !in 1..10 || proofRows.length() != artifacts.length()) return null

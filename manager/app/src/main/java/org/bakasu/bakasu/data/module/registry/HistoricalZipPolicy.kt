@@ -20,7 +20,9 @@ internal object HistoricalZipPolicy {
         val uri = runCatching { URI(url) }.getOrNull() ?: return null
         if (!uri.scheme.equals("https", true) || !uri.host.equals("github.com", true) ||
             uri.port !in listOf(-1, 443) || uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null
-        ) return null
+        ) {
+            return null
+        }
         val path = uri.rawPath?.removePrefix("/")?.split('/') ?: return null
         if (path.size != 6 || path[2] != "releases" || path[3] != "download") return null
         val decoded = path.map {

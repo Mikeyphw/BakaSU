@@ -253,7 +253,9 @@ class KernelSuRegistryRepository private constructor(
     ): ModuleUpdateMetadata? {
         if (!RegistryParser.isValidModuleId(moduleId) || !RegistryUrls.isHttpsUrl(updateJsonUrl) ||
             !RegistryUrls.isAllowedReleaseDownloadUrl(offered.zipUrl) || offered.versionCode <= installedCode
-        ) return null
+        ) {
+            return null
+        }
         val configured = configuredBaseUrls()
         val owner = ownerForUrl(updateJsonUrl)
         if (owner == null && configured.any { RegistryUrls.isSameOrigin(updateJsonUrl, it) }) return null
@@ -283,7 +285,9 @@ class KernelSuRegistryRepository private constructor(
         if (loaded.fromCache || loaded.catalog.fromCache || loaded.error != null ||
             detail.id != moduleId || detail.kind != RegistryKind.MODULE || detail.health?.status == "stale" ||
             detail.buildId != loaded.catalog.buildId
-        ) throw RegistryFormatException("Historical detail is not current")
+        ) {
+            throw RegistryFormatException("Historical detail is not current")
+        }
         val records = detail.releases.map {
             HistoricalZipRecord(it.tag, it.versionCode, it.zip.url, it.zip.size, it.zip.sha256, it.immutable)
         }

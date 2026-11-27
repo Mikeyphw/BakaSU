@@ -246,7 +246,9 @@ class ManagerUpdateRepository(
         val latestCandidates = candidates.filter { it.versionCode == latestVersionCode }
         if (latestCandidates.map { it.fileName }.toSet().size != latestCandidates.size ||
             latestCandidates.map { it.abi }.toSet().size != latestCandidates.size
-        ) return null
+        ) {
+            return null
+        }
         supportedAbis.forEach { abi ->
             latestCandidates.firstOrNull { it.abi == abi }?.let { return it }
         }

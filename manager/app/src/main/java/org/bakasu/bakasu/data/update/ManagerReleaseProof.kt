@@ -35,19 +35,25 @@ internal object ManagerReleaseProof {
             !validDigest(identity.sha256) || identity.size !in 100_001L..MAX_APK ||
             identity.versionCode <= 0 || !filename.matches(identity.fileName) ||
             compatibility.size !in 1..10 || provenance.size != compatibility.size
-        ) return null
+        ) {
+            return null
+        }
         if (compatibility.map { it.fileName }.toSet().size != compatibility.size ||
             provenance.map { it.fileName }.toSet().size != provenance.size ||
             compatibility.map { it.fileName }.toSet() != provenance.map { it.fileName }.toSet() ||
             compatibility.map { it.abi }.toSet().size != compatibility.size
-        ) return null
+        ) {
+            return null
+        }
         if (compatibility.any {
                 !filename.matches(it.fileName) || it.versionCode != identity.versionCode ||
                     it.managerUapi <= 0 || it.minimumKernelSuVersion <= 0 ||
                     !it.fileName.endsWith("_${it.versionCode}-${it.abi}-release.apk") ||
                     (it.abi != "universal" && it.abi !in nativeAbis)
             } || provenance.any { !validDigest(it.sha256) || it.size !in 100_001L..MAX_APK }
-        ) return null
+        ) {
+            return null
+        }
         val row = compatibility.singleOrNull { it.fileName == identity.fileName && it.versionCode == identity.versionCode && it.abi == identity.abi } ?: return null
         val asset = provenance.singleOrNull { it.fileName == identity.fileName } ?: return null
         if (asset.sha256 != identity.sha256 || asset.size != identity.size) return null

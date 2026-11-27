@@ -55,8 +55,7 @@ class LoadModuleIconUseCase(private val repository: ModuleIconRepository) {
 class ResolveModuleUpdateUseCase(private val repository: KernelSuRegistryRepository) {
     suspend operator fun invoke(moduleId: String, updateJsonUrl: String, zipUrl: String, versionCode: Int) = repository.resolveUpdate(moduleId, updateJsonUrl, zipUrl, versionCode)
 
-    suspend fun historical(moduleId: String, updateJsonUrl: String, installedCode: Int, offered: ModuleUpdateMetadata) =
-        repository.historicalReinstall(moduleId, updateJsonUrl, installedCode, offered)
+    suspend fun historical(moduleId: String, updateJsonUrl: String, installedCode: Int, offered: ModuleUpdateMetadata) = repository.historicalReinstall(moduleId, updateJsonUrl, installedCode, offered)
 
     fun isCurrent(update: ModuleUpdateVerification.Registry): Boolean = repository.isCurrent(update)
 }
