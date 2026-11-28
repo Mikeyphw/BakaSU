@@ -14,6 +14,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.bakasu.bakasu.data.module.registry.KernelSuRegistryRepository
+import org.bakasu.bakasu.data.network.LocalNetworkPermissionRequiredException
 import org.bakasu.bakasu.data.network.NetworkRequestRepository
 import org.bakasu.bakasu.data.network.NetworkStatusRepository
 import org.bakasu.bakasu.data.shell.KsuCliRepository
@@ -38,7 +39,7 @@ class ModuleRepository(
     suspend fun refreshInstalledModules(
         manual: Boolean,
         checkUpdates: Boolean,
-    ): Result<Unit> = refreshMutex.withLock {
+    ): Result<Boolean> = refreshMutex.withLock {
         withContext(Dispatchers.IO) {
             mutableInstalledModules.update { it.copy(refreshing = true) }
             runCatching {
@@ -63,48 +64,52 @@ class ModuleRepository(
                     metaModuleStatus = getMetaModuleStatus(),
                 )
 
-                if (checkUpdates && networkStatusRepository.isAvailable()) {
-                    val withUpdates = coroutineScope {
-                        modules.map { module ->
-                            async(Dispatchers.IO) {
-                                // Fetch one candidate per module, not twice for update + reinstall.
-                                // Preserve prior resolved metadata on a non-manual refresh.
-                                val cached = previous.firstOrNull {
-                                    it.id == module.id && it.versionCode == module.versionCode &&
-                                        it.updateJson == module.updateJson
-                                }
-                                val shouldCheck = manual || cached == null ||
-                                    module.remove || module.update || !module.enabled
-                                val candidate = if (shouldCheck) {
-                                    fetchUpdateMetadata(module.updateJson).getOrNull()
-                                } else {
-                                    cached?.moduleUpdate ?: cached?.moduleReinstall
-                                }
-                                val offered = candidate?.takeIf {
-                                    !module.remove && !module.update &&
-                                        it.versionCode >= module.versionCode &&
-                                        isSecureReinstallZipUrl(it.zipUrl)
-                                }
-                                val historical = if (offered != null && offered.versionCode > module.versionCode) {
-                                    if (shouldCheck) {
-                                        registry.historicalReinstall(module.id, module.updateJson, module.versionCode, offered)
-                                    } else {
-                                        cached?.moduleReinstall?.takeIf { previous ->
-                                            previous.historicalProof?.let(registry::isCurrent) == true
-                                        }
-                                    }
-                                } else {
-                                    null
-                                }
-                                module.copy(
-                                    moduleUpdate = candidate?.takeIf { it.versionCode > module.versionCode },
-                                    moduleReinstall = historical ?: offered,
-                                )
+                if (!checkUpdates || !networkStatusRepository.isAvailable()) return@runCatching false
+
+                val updateResults = coroutineScope {
+                    modules.map { module ->
+                        async(Dispatchers.IO) {
+                            // Fetch one candidate per module, not twice for update + reinstall.
+                            // Preserve prior resolved metadata on a non-manual refresh.
+                            val cached = previous.firstOrNull {
+                                it.id == module.id && it.versionCode == module.versionCode &&
+                                    it.updateJson == module.updateJson
                             }
-                        }.awaitAll()
-                    }
-                    mutableInstalledModules.update { current -> current.copy(modules = withUpdates) }
+                            val shouldCheck = manual || cached == null ||
+                                module.remove || module.update || !module.enabled
+                            val result = if (shouldCheck) {
+                                fetchUpdateMetadata(module.updateJson)
+                            } else {
+                                Result.success(cached?.moduleUpdate ?: cached?.moduleReinstall)
+                            }
+                            val error = result.exceptionOrNull()
+                            if (error is CancellationException) throw error
+                            val candidate = result.getOrNull()
+                            val offered = candidate?.takeIf {
+                                !module.remove && !module.update &&
+                                    it.versionCode >= module.versionCode &&
+                                    isSecureReinstallZipUrl(it.zipUrl)
+                            }
+                            val historical = if (offered != null && offered.versionCode > module.versionCode) {
+                                if (shouldCheck) {
+                                    registry.historicalReinstall(module.id, module.updateJson, module.versionCode, offered)
+                                } else {
+                                    cached?.moduleReinstall?.takeIf { previous ->
+                                        previous.historicalProof?.let(registry::isCurrent) == true
+                                    }
+                                }
+                            } else {
+                                null
+                            }
+                            module.copy(
+                                moduleUpdate = candidate?.takeIf { it.versionCode > module.versionCode },
+                                moduleReinstall = historical ?: offered,
+                            ) to (error is LocalNetworkPermissionRequiredException)
+                        }
+                    }.awaitAll()
                 }
+                mutableInstalledModules.update { current -> current.copy(modules = updateResults.map { it.first }) }
+                updateResults.any { it.second }
             }.onFailure {
                 mutableInstalledModules.update { current -> current.copy(refreshing = false) }
                 if (it is CancellationException) throw it
@@ -161,7 +166,7 @@ class ModuleRepository(
 
     private suspend fun fetchUpdateMetadata(url: String): Result<ModuleUpdateMetadata?> {
         if (url.isBlank()) return Result.success(null)
-        return networkRequestRepository.fetch(url).mapCatching { body ->
+        return networkRequestRepository.fetch(url, detectLocalNetworkPermission = true).mapCatching { body ->
             val json = JSONObject(body)
             val onlineVersionCode = json.optInt("versionCode", -1)
             val zipUrl = json.optString("zipUrl").trim()

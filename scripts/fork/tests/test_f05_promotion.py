@@ -93,6 +93,76 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(self.git('rev-parse', 'HEAD'), self.fork)
         self.assertEqual(self.store.read(), self.state)
 
+    def test_batched_exact_tree_binary_mode_and_rename(self):
+        # A real, independent large Git fixture. The synthetic report describes
+        # its exact local objects only; it cannot qualify a hosted run.
+        self.git('checkout', '-b', 'large-fork', self.fork)
+        (self.root / 'run.bin').write_bytes(b'\x00\xffold')
+        (self.root / 'run.bin').chmod(0o755)
+        self.git('add', 'run.bin')
+        self.git('commit', '-m', 'fork executable fixture')
+        fork = self.git('rev-parse', 'HEAD')
+        self.git('checkout', '-b', 'large-upstream', fork)
+        (self.root / 'run.bin').write_bytes(b'\x00\xffnew')
+        self.git('mv', 'delete.txt', 'renamed.txt')
+        for n in range(96):
+            (self.root / f'payload-{n:03}.bin').write_bytes(n.to_bytes(2, 'big')+b'\xff')
+        self.git('add', '-A')
+        self.git('commit', '-m', 'large upstream')
+        upstream = self.git('rev-parse', 'HEAD')
+        self.git('checkout', 'large-fork')
+        result = build.integration(self.root, fork, upstream, fetch_url=str(self.root))
+        state = j.ingest(self.initial,discovery_report(self.initial,candidate(source=upstream)),NOW)
+        key = 'beta:'+upstream
+        state, _ = j.begin(state,key,fork)
+        state = j.observe(state,key,[run(state,key)])
+        row = state['events'][key]
+        record = dict(result,schemaVersion=1,mode='F05-unsigned-diagnostic-only',channel='beta',upstreamEventId=10,status='debug-build-validated',apkChecksums={'fixture.apk':'a'*64})
+        before = self.git('rev-parse','HEAD')
+        plan = p.inventory(self.root,row,record,fork)
+        self.assertEqual([len(b['paths']) for b in plan['batches']], [48,48,3])
+        self.assertEqual(plan['batches'][0]['base_tree'],self.git('rev-parse',fork+'^{tree}'))
+        self.assertEqual(plan['batches'][-1]['post_tree'],result['mergedTreeSha'])
+        self.assertEqual(plan['batches'][0]['post_tree'],plan['batches'][1]['base_tree'])
+        self.assertEqual(len({path for b in plan['batches'] for path in b['paths']}),99)
+        mode = next(e for e in plan['entries'] if e['path']=='run.bin')
+        self.assertEqual((mode['old_mode'],mode['new_mode']),('100755','100755'))
+        self.assertEqual(mode['sha256'],hashlib.sha256(b'\x00\xffnew').hexdigest())
+        legacy=dict(record,changedPaths=self.git('diff','--find-renames','--name-only',fork,result['mergedSha']).splitlines())
+        self.assertEqual(p.inventory(self.root,row,legacy,fork),plan)
+        self.assertEqual(self.git('rev-parse','HEAD'),before)
+        self.assertFalse(self.git('status','--porcelain'))
+        with self.assertRaisesRegex(j.JournalError,'FINAL_TREE_MISMATCH'):
+            p._batch_trees(self.root,fork,plan['entries'][:-1],plan['post_tree'])
+        with self.assertRaisesRegex(j.JournalError,'DUPLICATE_PATH'):
+            p._batch_trees(self.root,fork,[plan['entries'][0]]*2,plan['post_tree'])
+        with self.assertRaisesRegex(j.JournalError,'BATCH_CAP'):
+            p._batch_trees(self.root,fork,[plan['entries'][0]]*193,plan['post_tree'])
+
+    def test_promotion_rejects_new_executable_and_symlink(self):
+        for name in ('executable','symlink'):
+            with self.subTest(name=name):
+                self.git('checkout','-b','fork-'+name,self.fork)
+                self.git('checkout','-b','upstream-'+name)
+                target=self.root/'new-path'
+                if name=='executable':
+                    target.write_text('fixture')
+                    target.chmod(0o755)
+                else:
+                    target.symlink_to('modify.txt')
+                self.git('add','new-path')
+                self.git('commit','-m','mode fixture')
+                upstream=self.git('rev-parse','HEAD')
+                self.git('checkout','fork-'+name)
+                result=build.integration(self.root,self.fork,upstream,fetch_url=str(self.root))
+                state=j.ingest(self.initial,discovery_report(self.initial,candidate(source=upstream)),NOW)
+                key='beta:'+upstream
+                state,_=j.begin(state,key,self.fork)
+                state=j.observe(state,key,[run(state,key)])
+                record=dict(result,schemaVersion=1,mode='F05-unsigned-diagnostic-only',channel='beta',upstreamEventId=10,status='debug-build-validated',apkChecksums={'fixture.apk':'a'*64})
+                with self.assertRaisesRegex(j.JournalError,'MODE_REQUIRES_REVIEW'):
+                    p.inventory(self.root,state['events'][key],record,self.fork)
+
     def test_wrong_report_tree_and_stale_base_rejected(self):
         for report, base in ((dict(self.report, mergedTreeSha='f'*40), self.fork), (self.report, self.upstream), (dict(self.report, changedPaths=[]), self.fork)):
             with self.subTest(report=report, base=base), self.assertRaises(j.JournalError):

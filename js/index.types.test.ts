@@ -10,7 +10,17 @@ child.on('exit', (code: number) => { void code; });
 const names: string[] = listPackages('fixture');
 const info: string = moduleInfo();
 const packages = getPackagesInfo(names);
-const version: number = packages[0].versionCode;
+const entry = packages[0];
+// @ts-expect-error Package lookup may return an error instead of metadata.
+const unsafeVersion: number = entry.versionCode;
+let version: number | undefined;
+if ("error" in entry) {
+    const error: string = entry.error;
+    void error;
+} else {
+    version = entry.versionCode;
+}
+void unsafeVersion;
 fullScreen(true); enableEdgeToEdge(false); toast(info);
 // @ts-expect-error Boolean flags are not strings.
 fullScreen('true');

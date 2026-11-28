@@ -145,7 +145,7 @@ def integration(root: Path, fork_sha: str, upstream_sha: str, *,
         raise StageError('MERGE_PARENT_PROVENANCE_MISMATCH')
     if git(root, 'status', '--porcelain=v1', '--untracked-files=all'):
         raise StageError('MERGED_CHECKOUT_DIRTY')
-    changed = git(root, 'diff', '--name-only', fork_sha, merged_sha).splitlines()
+    changed = git(root, 'diff', '--no-renames', '--name-only', fork_sha, merged_sha).splitlines()
     return {'forkSha': fork_sha, 'upstreamSha': upstream_sha, 'mergedSha': merged_sha,
             'mergedTreeSha': tree, 'changedPaths': changed, 'integrationMode': 'merge-commit'}
 

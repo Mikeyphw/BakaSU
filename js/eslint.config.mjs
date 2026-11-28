@@ -1,8 +1,8 @@
 export default [{
-  files: ['**/index.js', '**/index.test.mjs', '**/eslint.config.mjs'],
+  files: ['**/index.js', '**/index.test.mjs', '**/download.test.mjs', '**/webview/download.js', '**/eslint.config.mjs'],
   languageOptions: {
     ecmaVersion: 'latest', sourceType: 'module',
-    globals: {window: 'readonly', ksu: 'readonly', globalThis: 'readonly'}
+    globals: {window: 'readonly', ksu: 'readonly', globalThis: 'readonly', URL: 'readonly', Blob: 'readonly', Buffer: 'readonly', FileReader: 'readonly', HTMLAnchorElement: 'readonly', document: 'readonly', location: 'readonly', fetch: 'readonly', console: 'readonly', setTimeout: 'readonly', ksu_download: 'readonly'}
   },
   rules: {
     'no-undef': 'error', 'no-unreachable': 'error',

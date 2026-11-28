@@ -55,6 +55,10 @@ test('metadata parsing, malformed response refusal and UI delegation', () => {
   };
   assert.deepEqual(listPackages('fixture'), ['pkg']);
   assert.deepEqual(getPackagesInfo(['pkg']), [{ packageName: 'pkg' }]);
+  ksu.getPackagesInfo = () => '[{"packageName":"pkg","versionCode":42},{"packageName":"missing","error":"not found"}]';
+  assert.deepEqual(getPackagesInfo(['pkg', 'missing']), [
+    { packageName: 'pkg', versionCode: 42 }, { packageName: 'missing', error: 'not found' }
+  ]);
   ksu.listPackages = () => 'not-json';
   ksu.getPackagesInfo = () => 'not-json';
   assert.deepEqual(listPackages('fixture'), []);

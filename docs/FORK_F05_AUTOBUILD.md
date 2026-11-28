@@ -36,3 +36,23 @@ Only GitHub Actions may invoke Gradle. Source changes require the native Devtool
 ## GAP-04 signing transition
 
 The GAP-03 owner journal is the durable authority. After exact native promotion and reservation, use its read-only `export-signing-reservation` command and separately review the emitted immutable row and persistent certificate in the F06 policy. Do not re-integrate upstream in F06. See `FORK_F06_SIGNED_QUALIFICATION.md`.
+
+## Bounded atomic upstream promotion
+
+Promotion plans carry the exact first-parent preimage and the reviewed merge tree.
+The version-2 inventory records each added, deleted or modified Git path, byte
+length, SHA-256 pre/postimages, Git blobs and modes. A move is an explicit deletion
+and addition. Deterministic deletion-first batches contain at most 48 paths each,
+with at most four batches; every intermediate Git tree and the final tree are
+verified. Existing executable files may retain their exact mode; new executable
+paths, symlinks, gitlinks and mode changes still require separate review.
+
+A compatible native Devtool format-2 promotion applies the complete inventory in
+one isolated atomic transaction, validates the resulting source and adopts the
+exact reviewed two-parent merge. The fork's main branch must retain the upstream
+parent through a reviewed merge commit (not a squash). A failed batch or validation
+never produces a partial PR, published release, journal reservation or signing
+state. Reconcile existing journal attempts and retry F05 only against a different
+verified main commit. An integrated source that already contains the upstream
+commit is still independently verified and built by F05; source review is not a
+substitute for that hosted build.

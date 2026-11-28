@@ -9,6 +9,8 @@ an actual committed ancestor of canonical main.
 from __future__ import annotations
 
 import hashlib
+import os
+import tempfile
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
@@ -16,6 +18,7 @@ import subprocess
 from event_journal import require,sha,integer,MAX_VERSION,REPO
 
 MAX_PATHS=48
+MAX_BATCHES=4
 MAX_RELEASE_PAGES=20
 APK=re.compile(r'BakaSU_(.+)_([1-9][0-9]{0,9})-(arm64-v8a|armeabi-v7a|x86_64|riscv64|universal)-release\.apk\Z')
 HEX256=re.compile(r'^[0-9a-f]{64}$')
@@ -50,10 +53,41 @@ def verify_diagnostic(root: Path,row: dict,report: dict)->dict:
     return {'commit':merged,'tree':tree,'forkSha':a['forkSha'],'diagnosticRunId':a['runId'],'upstreamSha':e['source']}
 
 
+def _batch_trees(root: Path, base: str, entries: list[dict], final_tree: str) -> list[dict]:
+    """Reconstruct exact trees with a disposable index, never the owner index/ref.
+
+    Deletions precede additions so file/directory transitions remain representable.
+    Every intermediate tree is independently bound to the ordered inventory.
+    No worktree files, branch refs or provider state are modified here.
+    """
+    require(len(entries)<=MAX_PATHS*MAX_BATCHES,'PROMOTION_BATCH_CAP_REVIEW_REQUIRED')
+    ordered=sorted(entries,key=lambda e:(e['action']!='delete',e['path']))
+    require(len({e['path'] for e in ordered})==len(ordered),'PROMOTION_DUPLICATE_PATH')
+    batches=[]
+    with tempfile.TemporaryDirectory(prefix='bakasu-promotion-index-') as folder:
+        env={k:v for k,v in os.environ.items() if k not in ('GIT_INDEX_FILE','GIT_DIR','GIT_WORK_TREE','GIT_COMMON_DIR','GIT_OBJECT_DIRECTORY','GIT_ALTERNATE_OBJECT_DIRECTORIES')}
+        env.update(GIT_INDEX_FILE=str(Path(folder)/'index'),GIT_NO_REPLACE_OBJECTS='1')
+        def index_git(*args, data=None):
+            proc=subprocess.run(['git','--no-replace-objects','-C',str(root),*args],input=data,env=env,capture_output=True,timeout=45,check=False)
+            require(proc.returncode==0,'PROMOTION_INDEX_REFUSED_'+args[0]);return proc.stdout
+        index_git('read-tree',base)
+        before=index_git('write-tree').decode().strip()
+        require(before==oid(root,base+'^{tree}'),'PROMOTION_INDEX_BASE_TREE_MISMATCH')
+        for offset in range(0,len(ordered),MAX_PATHS):
+            chunk=ordered[offset:offset+MAX_PATHS]
+            data=b''.join((e['new_mode']+' '+e['new_blob']+'\t'+e['path']).encode('utf-8')+b'\0' for e in chunk)
+            index_git('update-index','-z','--index-info',data=data)
+            after=index_git('write-tree').decode().strip();require(sha(after),'PROMOTION_BATCH_TREE_INVALID')
+            batches.append({'number':len(batches)+1,'base_tree':before,'post_tree':after,'paths':[e['path'] for e in chunk]})
+            before=after
+        require(before==final_tree,'PROMOTION_BATCH_FINAL_TREE_MISMATCH')
+    return batches
+
+
 def inventory(root: Path,row: dict,report: dict,main: str)->dict:
     proof=verify_diagnostic(root,row,report);require(main==proof['forkSha'],'PROMOTION_MAIN_DRIFT_REQUALIFY')
-    # The native overlay must carry the exact byte inventory. Unsupported
-    # modes, gitlinks and paths are refused for separate reviewed handling.
+    # Each batch remains bounded by the native 48-path limit. A larger or
+    # unsupported mode inventory still refuses rather than approximating it.
     raw=git(root,'diff','--raw','--no-abbrev','--no-renames','-z',main,proof['commit']).split(b'\0')
     require(raw[-1]==b'' and (len(raw)-1)%2==0,'PROMOTION_DIFF_INVALID')
     entries=[]
@@ -61,14 +95,23 @@ def inventory(root: Path,row: dict,report: dict,main: str)->dict:
         fields=meta.decode('ascii').lstrip(':').split();require(len(fields)==5,'PROMOTION_DIFF_INVALID')
         oldmode,newmode,oldoid,newoid,status=fields
         path=name.decode('utf-8','strict');parts=PurePosixPath(path).parts
-        require(parts and not path.startswith('/') and '\\' not in path and all(p not in ('.','..','.git','.devtool-artifact.json') for p in parts) and not any(ord(c)<32 or ord(c)==127 for c in path),'PROMOTION_PATH_UNSAFE')
-        require(status in ('A','D','M') and oldmode in ('000000','100644') and newmode in ('000000','100644'),'PROMOTION_MODE_REQUIRES_REVIEW')
+        require(parts and not path.startswith('/') and '\\' not in path and ':' not in path and all(p not in ('','.','..','.git','.devtool-artifact.json') for p in path.split('/')) and not any(ord(c)<32 or ord(c)==127 for c in path),'PROMOTION_PATH_UNSAFE')
+        require(status in ('A','D','M') and ((oldmode,newmode) in (('000000','100644'),('100644','000000'),('100644','100644')) or (status=='M' and oldmode==newmode=='100755')),'PROMOTION_MODE_REQUIRES_REVIEW')
+        require(sha(oldoid) and sha(newoid),'PROMOTION_BLOB_IDENTITY_INVALID')
         before=None if status=='A' else hashlib.sha256(git(root,'cat-file','blob',oldoid)).hexdigest()
-        after=None if status=='D' else hashlib.sha256(git(root,'cat-file','blob',newoid)).hexdigest()
-        entries.append({'path':path,'action':{'A':'add','D':'delete','M':'modify'}[status],'source_sha256':before,'sha256':after,'old_blob':oldoid,'new_blob':newoid})
-    require(len(entries)<=MAX_PATHS,'PROMOTION_NATIVE_PATH_CAP_REVIEW_REQUIRED')
-    require(set(report.get('changedPaths',[]))=={x['path'] for x in entries},'PROMOTION_REPORT_INVENTORY_MISMATCH')
-    return {'schemaVersion':1,'repository':REPO,'status':'REVIEW_REQUIRED','base_commit':main,'base_tree':oid(root,main+'^{tree}'),'post_tree':proof['tree'],'diagnostic_commit':proof['commit'],'diagnostic_run':proof['diagnosticRunId'],'upstream_sha':proof['upstreamSha'],'entries':entries}
+        post_bytes=None if status=='D' else git(root,'cat-file','blob',newoid)
+        after=None if post_bytes is None else hashlib.sha256(post_bytes).hexdigest()
+        entries.append({'path':path,'action':{'A':'add','D':'delete','M':'modify'}[status],'source_sha256':before,'sha256':after,'size':len(post_bytes or b''),'old_blob':oldoid,'new_blob':newoid,'old_mode':oldmode,'new_mode':newmode})
+    require(len(entries)<=MAX_PATHS*MAX_BATCHES,'PROMOTION_BATCH_CAP_REVIEW_REQUIRED')
+    reported=report.get('changedPaths');require(isinstance(reported,list) and all(isinstance(p,str) for p in reported) and len(reported)==len(set(reported)),'PROMOTION_REPORT_INVENTORY_INVALID')
+    # Earlier schema-1 producers used Git's rename-aware name-only output.
+    # Reconcile that exact historical projection as well as the current
+    # complete add/delete projection; neither can drop a path in the plan.
+    legacy=git(root,'diff','--name-only','-z','--find-renames',main,proof['commit']).split(b'\0')
+    require(legacy[-1]==b'','PROMOTION_LEGACY_DIFF_INVALID')
+    require(set(reported) in ({x['path'] for x in entries},{p.decode('utf-8','strict') for p in legacy[:-1]}),'PROMOTION_REPORT_INVENTORY_MISMATCH')
+    batches=_batch_trees(root,main,entries,proof['tree'])
+    return {'schemaVersion':2,'repository':REPO,'status':'REVIEW_REQUIRED','base_commit':main,'base_tree':oid(root,main+'^{tree}'),'post_tree':proof['tree'],'diagnostic_commit':proof['commit'],'diagnostic_run':proof['diagnosticRunId'],'upstream_sha':proof['upstreamSha'],'entries':entries,'batches':batches,'max_paths_per_batch':MAX_PATHS}
 
 
 def promoted(root: Path,row: dict,report: dict,commit: str,main: str)->dict:
